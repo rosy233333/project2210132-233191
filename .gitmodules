@@ -1,6 +1,11 @@
 [submodule "arceos-ats-intc"]
 	path = arceos-ats-intc
 	url = https://github.com/rosy233333/arceos-ats-intc.git
+	branch = dev
 [submodule "tcp-client"]
 	path = tcp-client
 	url = https://github.com/rosy233333/tcp-client.git
+[submodule "qemu"]
+	path = qemu
+	url = https://github.com/rosy233333/qemu.git
+	branch = dev

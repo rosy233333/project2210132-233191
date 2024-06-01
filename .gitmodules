@@ -9,3 +9,4 @@
 	path = qemu
 	url = https://github.com/rosy233333/qemu.git
 	branch = dev
+	name = qemu

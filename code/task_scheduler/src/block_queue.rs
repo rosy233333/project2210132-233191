@@ -1,8 +1,8 @@
-use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
 use crate::scheduler::Scheduler;
 
 pub struct BlockQueue<T> {
-    queue: VecDeque<(T, Box<dyn Fn(&T) -> bool>)>
+    queue: VecDeque<Arc<T>>
 }
 
 impl<T> BlockQueue<T> {
@@ -12,72 +12,82 @@ impl<T> BlockQueue<T> {
         }
     }
 
-    pub fn add(&mut self, task: T) {
-        self.queue.push_back((task, Box::new(|_| { true })))
+    pub fn add(&mut self, task: Arc<T>) {
+        self.queue.push_back(task)
     }
 
-    // 以这种方式加入的任务，在BlockQueue调用wake系列方法时，会先检查对应的cond结果，为真则唤醒，为假则保留在阻塞队列中。
-    // 此外，如果调用该函数时，cond已经为真，则不会阻塞。
-    pub fn add_with_cond<F>(&mut self, task: T, cond: F)
-    where F: Fn(&T) -> bool + 'static {
-        if !cond(&task) {
-            self.queue.push_back((task, Box::new(cond)))
-        } 
-    }
-
-    pub fn wake_one(&mut self) -> Option<T> {
+    // wake_action的返回值：true代表中止遍历，false代表继续遍历。
+    fn wake_raw_with_cond<F, G>(&mut self, cond: F, mut wake_action: G)
+    where F: Fn(&T) -> bool, G: FnMut(Arc<T>) -> bool {
         for _ in 0 .. self.queue.len() {
-            let (task, cond) = self.queue.pop_front().unwrap();
+            let task = self.queue.pop_front().unwrap();
             if cond(&task) {
-                return Some(task);
+                if wake_action(task) {
+                    break;
+                }
             }
             else {
-                self.queue.push_back((task, cond))
+                self.queue.push_back(task)
             }
         }
-        None
     }
 
-    pub fn wake_all(&mut self) -> Vec<T> {
-        let mut ret_vec: Vec<T> = Vec::new();
-        for _ in 0 .. self.queue.len() {
-            let (task, cond) = self.queue.pop_front().unwrap();
-            if cond(&task) {
-                ret_vec.push(task);
-            }
-            else {
-                self.queue.push_back((task, cond))
-            }
-        }
+    pub fn wake_one_with_cond<F>(&mut self, cond: F) -> Option<Arc<T>>
+    where F: Fn(&T) -> bool {
+        let mut return_task: Option<Arc<T>> = None;
+        self.wake_raw_with_cond(cond, |task| {
+            return_task = Some(task);
+            true
+        });
+        return_task
+    }
+
+    pub fn wake_one(&mut self) -> Option<Arc<T>> {
+        self.wake_one_with_cond(|_| { true })
+    }
+
+    pub fn wake_all_with_cond<F>(&mut self, cond: F) -> Vec<Arc<T>>
+    where F: Fn(&T) -> bool {
+        let mut ret_vec: Vec<Arc<T>> = Vec::new();
+        self.wake_raw_with_cond(cond, |task| {
+            ret_vec.push(task);
+            false
+        });
         ret_vec
     }
 
+    pub fn wake_all(&mut self) -> Vec<Arc<T>> {
+        self.wake_all_with_cond(|_| { true })
+    }
+
+    /// 返回值代表唤醒任务的个数
+    pub fn wake_one_to_scheduler_with_cond<F>(&mut self, scheduler: &mut Scheduler<T>, cond: F) -> usize
+    where F: Fn(&T) -> bool {
+        let mut wake_task_num: usize = 0;
+        self.wake_raw_with_cond(cond, |task| {
+            scheduler.add(task);
+            wake_task_num += 1;
+            true
+        });
+        wake_task_num
+    }
+
     pub fn wake_one_to_scheduler(&mut self, scheduler: &mut Scheduler<T>) -> usize {
-        for _ in 0 .. self.queue.len() {
-            let (task, cond) = self.queue.pop_front().unwrap();
-            if cond(&task) {
-                scheduler.add(task);
-                return 1;
-            }
-            else {
-                self.queue.push_back((task, cond))
-            }
-        }
-        0
+        self.wake_one_to_scheduler_with_cond(scheduler, |_| { true })
+    }
+
+    pub fn wake_all_to_scheduler_with_cond<F>(&mut self, scheduler: &mut Scheduler<T>, cond: F) -> usize
+    where F: Fn(&T) -> bool {
+        let mut wake_task_num: usize = 0;
+        self.wake_raw_with_cond(cond, |task| {
+            scheduler.add(task);
+            wake_task_num += 1;
+            false
+        });
+        wake_task_num
     }
 
     pub fn wake_all_to_scheduler(&mut self, scheduler: &mut Scheduler<T>) -> usize {
-        let mut wake_num: usize = 0;
-        for _ in 0 .. self.queue.len() {
-            let (task, cond) = self.queue.pop_front().unwrap();
-            if cond(&task) {
-                scheduler.add(task);
-                wake_num += 1;
-            }
-            else {
-                self.queue.push_back((task, cond))
-            }
-        }
-        wake_num
+        self.wake_all_to_scheduler_with_cond(scheduler, |_| { true })
     }
 }

@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 use crate::scheduler::Scheduler;
 
 pub struct BlockQueue<T> {
@@ -12,7 +12,7 @@ impl<T> BlockQueue<T> {
         }
     }
 
-    pub fn add(&mut self, task: Arc<T>) {
+    pub fn add(&mut self, task: Arc<T>, priority: usize) {
         self.queue.push_back(task)
     }
 
@@ -60,34 +60,34 @@ impl<T> BlockQueue<T> {
         self.wake_all_with_cond(|_| { true })
     }
 
-    /// 返回值代表唤醒任务的个数
-    pub fn wake_one_to_scheduler_with_cond<F>(&mut self, scheduler: &mut Scheduler<T>, cond: F) -> usize
-    where F: Fn(&T) -> bool {
-        let mut wake_task_num: usize = 0;
-        self.wake_raw_with_cond(cond, |task| {
-            scheduler.add(task);
-            wake_task_num += 1;
-            true
-        });
-        wake_task_num
-    }
+    // /// 返回值代表唤醒任务的个数
+    // pub fn wake_one_to_scheduler_with_cond<F>(&mut self, scheduler: &mut Scheduler<T>, cond: F) -> usize
+    // where F: Fn(&T) -> bool {
+    //     let mut wake_task_num: usize = 0;
+    //     self.wake_raw_with_cond(cond, |task| {
+    //         scheduler.add(task);
+    //         wake_task_num += 1;
+    //         true
+    //     });
+    //     wake_task_num
+    // }
 
-    pub fn wake_one_to_scheduler(&mut self, scheduler: &mut Scheduler<T>) -> usize {
-        self.wake_one_to_scheduler_with_cond(scheduler, |_| { true })
-    }
+    // pub fn wake_one_to_scheduler(&mut self, scheduler: &mut Scheduler<T>) -> usize {
+    //     self.wake_one_to_scheduler_with_cond(scheduler, |_| { true })
+    // }
 
-    pub fn wake_all_to_scheduler_with_cond<F>(&mut self, scheduler: &mut Scheduler<T>, cond: F) -> usize
-    where F: Fn(&T) -> bool {
-        let mut wake_task_num: usize = 0;
-        self.wake_raw_with_cond(cond, |task| {
-            scheduler.add(task);
-            wake_task_num += 1;
-            false
-        });
-        wake_task_num
-    }
+    // pub fn wake_all_to_scheduler_with_cond<F>(&mut self, scheduler: &mut Scheduler<T>, cond: F) -> usize
+    // where F: Fn(&T) -> bool {
+    //     let mut wake_task_num: usize = 0;
+    //     self.wake_raw_with_cond(cond, |task| {
+    //         scheduler.add(task);
+    //         wake_task_num += 1;
+    //         false
+    //     });
+    //     wake_task_num
+    // }
 
-    pub fn wake_all_to_scheduler(&mut self, scheduler: &mut Scheduler<T>) -> usize {
-        self.wake_all_to_scheduler_with_cond(scheduler, |_| { true })
-    }
+    // pub fn wake_all_to_scheduler(&mut self, scheduler: &mut Scheduler<T>) -> usize {
+    //     self.wake_all_to_scheduler_with_cond(scheduler, |_| { true })
+    // }
 }

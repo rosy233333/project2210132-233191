@@ -2,6 +2,6 @@
 
 extern crate alloc;
 
-mod scheduler;
-mod current;
-mod block_queue;
+pub mod scheduler;
+pub mod current;
+pub mod block_queue;

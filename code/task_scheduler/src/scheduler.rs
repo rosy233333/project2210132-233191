@@ -1,26 +1,43 @@
 #[cfg(not(feature = "moic"))]
 use alloc::collections::VecDeque;
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 #[cfg(not(feature = "moic"))]
 use spinlock::SpinNoIrq;
 
 pub struct Scheduler<T> {
     #[cfg(not(feature = "moic"))]
-    ready_queue: SpinNoIrq<VecDeque<Arc<T>>>,
+    prio_level_num: usize,
+    #[cfg(not(feature = "moic"))]
+    ready_queues: Vec<SpinNoIrq<VecDeque<Arc<T>>>>,
 }
 
 impl<T> Scheduler<T> {
-    pub fn new() -> Scheduler<T> {
-        Self {
-            #[cfg(not(feature = "moic"))]
-            ready_queue: SpinNoIrq::new(VecDeque::new())
+    pub fn new(prio_level_num: usize) -> Scheduler<T> {
+        #[cfg(not(feature = "moic"))]
+        {
+            let mut scheduler = Self {
+                #[cfg(not(feature = "moic"))]
+                prio_level_num,
+                #[cfg(not(feature = "moic"))]
+                ready_queues: Vec::new(),
+            };
+            for _ in 0 .. prio_level_num {
+                scheduler.ready_queues.push(SpinNoIrq::new(VecDeque::new()));
+            }
+            scheduler
+        }
+
+        #[cfg(feature = "moic")]
+        {
+
         }
     }
 
-    pub fn add(&mut self, task: Arc<T>) {
+    pub fn add(&mut self, task: Arc<T>, priority: usize) {
         #[cfg(not(feature = "moic"))]
         {
-            self.ready_queue.lock().push_back(task);
+            assert!(priority < self.prio_level_num);
+            self.ready_queues[priority].lock().push_back(task);
         }
 
         #[cfg(feature = "moic")]
@@ -32,7 +49,14 @@ impl<T> Scheduler<T> {
     pub fn fetch(&mut self) -> Option<Arc<T>> {
         #[cfg(not(feature = "moic"))]
         {
-            self.ready_queue.lock().pop_front()
+            let mut return_task: Option<Arc<T>> = None;
+            for priority in 0 .. self.prio_level_num {
+                return_task = self.ready_queues[priority].lock().pop_front();
+                if return_task.is_some() {
+                    break;
+                }
+            }
+            return_task
         }
 
         #[cfg(feature = "moic")]
@@ -40,18 +64,15 @@ impl<T> Scheduler<T> {
 
         }
     }
-}
 
-impl<T> Scheduler<T>
-{
-    // 实现移除功能需要代表任务的类型可以判断是否相等。
-    // 如果代表任务的类型是一个给定类型的指针，则可以将“相等”定义成它们指向相同的内存区域。
     pub fn remove(&mut self, task: Arc<T>) {
         #[cfg(not(feature = "moic"))]
         {
-            self.ready_queue.lock().retain(|task_in_queue| {
-                !Arc::ptr_eq(task_in_queue, &task)
-            })
+            for priority in 0 .. self.prio_level_num {
+                self.ready_queues[priority].lock().retain(|task_in_queue| {
+                    !Arc::ptr_eq(task_in_queue, &task)
+                })
+            }
         }
 
         #[cfg(feature = "moic")]

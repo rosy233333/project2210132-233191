@@ -1,11 +1,12 @@
 [package]
-name = "task_scheduler"
+name = "task_queues"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+cfg-if = "1.0"
 spinlock = { git = "https://github.com/Starry-OS/spinlock.git" }
-percpu = { git = "https://github.com/Starry-OS/percpu" }
+scheduler = { git = "https://github.com/Starry-OS/scheduler.git" }
 
 [features]
 # 使用 [moic](https://github.com/ATS-INTC/moic) 调度
@@ -14,3 +15,8 @@ moic = []
 smp = [ "spinlock/smp" ]
 # 若系统支持抢占，则需要启用该feature，同时也需按照 [kernel_guard依赖项](https://github.com/Starry-OS/kernel_guard) 的要求实现 `KernelGuardIf` 接口
 premmpt = []
+# 各类调度策略
+sched_rr = []
+sched_cfs = []
+sched_fifo = []
+sched_statprio = [] #静态优先级调度算法

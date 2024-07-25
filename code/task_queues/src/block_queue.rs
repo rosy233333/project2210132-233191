@@ -1,5 +1,4 @@
 use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
-use crate::scheduler::Scheduler;
 
 pub struct BlockQueue<T> {
     queue: VecDeque<Arc<T>>
@@ -12,7 +11,7 @@ impl<T> BlockQueue<T> {
         }
     }
 
-    pub fn add(&mut self, task: Arc<T>, priority: usize) {
+    pub fn add(&mut self, task: Arc<T>) {
         self.queue.push_back(task)
     }
 

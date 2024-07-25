@@ -1,2 +1,4 @@
-code/task_scheduler/target
-code/task_scheduler/Cargo.lock
+code/task_queues/target
+code/task_queues/Cargo.lock
+code/task_management/target
+code/task_management/Cargo.lock

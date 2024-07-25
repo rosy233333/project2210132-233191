@@ -1,0 +1,15 @@
+[package]
+name = "task_management"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+task_queues = { path = "../task_queues" }
+spinlock = { git = "https://github.com/Starry-OS/spinlock.git" }
+crossbeam = { version = "0.8", default-features = false, features = ["alloc"] }
+
+[features]
+# 对多处理器的支持
+smp = [ "spinlock/smp", "task_queues/smp" ]
+# 若系统支持抢占，则需要启用该feature，同时也需按照 [kernel_guard依赖项](https://github.com/Starry-OS/kernel_guard) 的要求实现 `KernelGuardIf` 接口
+premmpt = [ "task_queues/premmpt" ]

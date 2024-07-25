@@ -1,8 +1,0 @@
-[package]
-name = "task_switch"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-task_scheduler = { path = "../task_scheduler" }
-spinlock = { git = "https://github.com/Starry-OS/spinlock.git" }

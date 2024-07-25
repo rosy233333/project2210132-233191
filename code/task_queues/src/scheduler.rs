@@ -1,6 +1,5 @@
-use scheduler::{ CFScheduler, CFSTask, FifoScheduler, FifoTask, RRScheduler, RRTask };
+use scheduler::{ CFScheduler, CFSTask, FifoScheduler, FifoTask, RRScheduler, RRTask, StatPrioScheduler, StatPrioTask };
 
-mod static_priority;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "sched_rr")] {
@@ -10,9 +9,13 @@ cfg_if::cfg_if! {
     } else if #[cfg(feature = "sched_cfs")] {
         pub type AxTask<T> = scheduler::CFSTask<T>;
         pub type Scheduler<T> = scheduler::CFScheduler<T>;
-    } else {
-        // If no scheduler features are set, use FIFO as the default.
+    } else if #[cfg(feature = "sched_fifo")] {
         pub type AxTask<T> = scheduler::FifoTask<T>;
         pub type Scheduler<T> = scheduler::FifoScheduler<T>;
+    } else {
+        // If no scheduler features are set, use Static Priority as the default.
+        const PRIO_LEVEL_NUM: usize = 8;
+        pub type AxTask<T> = scheduler::StatPrioTask<T, PRIO_LEVEL_NUM>;
+        pub type Scheduler<T> = scheduler::StatPrioScheduler<T, PRIO_LEVEL_NUM>;
     }
 }

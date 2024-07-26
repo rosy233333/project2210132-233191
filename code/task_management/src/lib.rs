@@ -1,10 +1,12 @@
 #![no_std]
+#![feature(naked_functions)]
+#![feature(arbitrary_self_types)]
 
 extern crate alloc;
 
-pub mod api;
+mod api;
 mod processor;
 mod task;
-mod task_switch;
-mod stack_pool;
-mod waker;
+mod stack;
+
+pub use api::*;

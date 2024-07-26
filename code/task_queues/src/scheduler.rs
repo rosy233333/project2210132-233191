@@ -1,5 +1,6 @@
 use scheduler::{ CFScheduler, CFSTask, FifoScheduler, FifoTask, RRScheduler, RRTask, StatPrioScheduler, StatPrioTask };
 
+pub use scheduler::BaseScheduler;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "sched_rr")] {

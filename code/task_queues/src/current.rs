@@ -5,9 +5,9 @@ use alloc::sync::Arc;
 pub struct CurrentTask<T>(Arc<T>);
 
 impl<T> CurrentTask<T> {
-    pub fn new(task: T) -> Self {
+    pub fn new(task: Arc<T>) -> Self {
         Self {
-            0: Arc::new(task)
+            0: task
         }
     }
 

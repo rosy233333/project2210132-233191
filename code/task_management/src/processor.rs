@@ -1,6 +1,7 @@
 use core::cell::UnsafeCell;
 
 use alloc::sync::Arc;
+use kernel_guard::{IrqSave, NoPreemptIrqSave};
 use lazy_init::LazyInit;
 use spinlock::{SpinNoIrq, SpinNoIrqGuard};
 use task_queues::scheduler::{self, BaseScheduler};
@@ -35,6 +36,9 @@ pub(crate) struct Processor {
 
     /// 空闲时执行的任务
     idle_task: Arc<Task>,
+
+    /// 用于在任务切换过程中关闭中断与抢占
+    switch_guard: UnsafeCell<Option<IrqSave>>
 }
 
 pub(crate) type CurrentTask = task_queues::current::CurrentTask<Task>;
@@ -63,6 +67,46 @@ impl Processor {
     pub(crate) fn current_task(&self) -> &mut CurrentTask {
         unsafe { &mut *self.current_task.get() }
     }
+
+    /// 关闭当前CPU上的中断
+    /// 目前仅用于任务切换
+    #[inline]
+    pub(crate) fn acquire_switch_guard(&self) {
+        unsafe {
+            assert!((*self.switch_guard.get()).is_none());
+            *self.switch_guard.get() = Some(IrqSave::new());
+        }
+    }
+
+    /// 获取关中断时保存的sstatus
+    #[inline]
+    pub(crate) fn get_sstatus_in_switch_guard(&self) -> usize {
+        unsafe {
+            if let Some(switch_guard) = &*self.switch_guard.get() {
+                switch_guard.get_state()
+            }
+            else {
+                panic!("call get_sstatus_in_switch_guard() without acquire_switch_guard() !");
+            }
+        }
+    }
+
+    /// 恢复当前CPU上的中断
+    /// 目前仅用于任务切换
+    #[inline]
+    pub(crate) fn release_switch_guard(&self) {
+        unsafe {
+            assert!((*self.switch_guard.get()).is_some());
+            *self.switch_guard.get() = None;
+        }
+    }
+
+    #[inline]
+    pub(crate) fn get_stack_pool_mut(&self) -> &mut StackPool {
+        unsafe {
+            &mut *self.stack_pool.get()
+        }
+    } 
 }
 
 /// pub(crate) 方法
@@ -142,6 +186,30 @@ impl Processor {
             scheduler.add_task(task);
         })
     }
+
+    /// 选取并从调度器中取出最高优先级的任务
+    pub(crate) fn pick_next_task(&self) -> Arc<Task> {
+        let local_priority = self.with_local_scheduler(|scheduler| { scheduler.highest_priority() });
+        let global_priority = self.with_global_scheduler(|scheduler| { scheduler.highest_priority() });
+
+        let scheduler_task = if local_priority <= global_priority {
+            // 从本地调度器取任务
+            self.with_local_scheduler(|scheduler| { scheduler.pick_next_task() })
+        }
+        else {
+            // 从全局调度器取任务
+            self.with_global_scheduler(|scheduler| { scheduler.pick_next_task() })
+        };
+
+        // 没有任务的队列优先级为N，而有任务的队列优先级最低也为N-1。
+        // 因此，如果较低优先级的队列没有任务，则另一个队列也一定没有任务。
+        if let Some(task) = scheduler_task {
+            task
+        }
+        else {
+            self.idle_task.clone()
+        }
+    }
 }
 
 /// private方法
@@ -155,6 +223,7 @@ impl Processor {
             current_task: UnsafeCell::new(CurrentTask::new(idle_task.clone())),
             stack_pool: UnsafeCell::new(StackPool::new()),
             idle_task,
+            switch_guard: UnsafeCell::new(None),
         }
     }
 }

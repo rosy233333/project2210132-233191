@@ -1,4 +1,4 @@
-use core::{future::Future, mem::ManuallyDrop, pin::Pin, ptr::NonNull, sync::atomic::{AtomicI32, AtomicU64, Ordering}, task::Poll};
+use core::{future::{poll_fn, Future, Pending}, mem::ManuallyDrop, pin::Pin, ptr::NonNull, sync::atomic::{AtomicI32, AtomicU64, Ordering}, task::Poll};
 use alloc::{boxed::Box, sync::Arc};
 use spinlock::{SpinNoIrq, SpinNoIrqGuard};
 use crossbeam::atomic::AtomicCell;
@@ -11,7 +11,7 @@ mod waker;
 pub(crate) use reg_context::TaskContext;
 pub(crate) use switch::{preempt_switch_entry, switch_entry};
 
-use crate::{exit_current, exit_current_async, processor::Processor};
+use crate::{exit_current, exit_current_async, processor::Processor, stack::TaskStack};
 
 pub type Task = AxTask<TaskInner>;
 
@@ -59,12 +59,16 @@ pub struct TaskInner {
 
     /// ---上下文相关---
     /// The future of the async task.
-    future: Option<AtomicCell<Pin<Box<dyn Future<Output = ()> + 'static + Send>>>>, // 取值为Some还是None是在创建时确定的，因此Option在AtomicCell外部
+    future: AtomicCell<Pin<Box<dyn Future<Output = ()> + 'static + Send>>>,
 
     /// When the async task is breaked by the interrupt,
     /// this field will be valid. Otherwise, it is dangerous to access this field.
     /// 我打算在我的模块中同时支持线程和协程。线程总是使用ctx_ref，而不使用future。
     ctx_ref: AtomicCell<NonNull<TaskContext>>,
+
+    /// 保存寄存器上下文时，任务持有的栈
+    /// 任务正在运行或以Future形式保存上下文时，该字段为None
+    owned_stack: AtomicCell<Option<Arc<TaskStack>>>,
 }
 
 /// The possible states of a task.
@@ -128,6 +132,17 @@ impl TaskInner {
     }
 
     #[inline]
+    pub(crate) fn is_idle(&self) -> bool {
+        self.is_idle
+    }
+
+    #[inline]
+    pub(crate) fn is_init(&self) -> bool {
+        self.is_init
+    }
+
+
+    #[inline]
     /// lock the task state and ctx_ptr access
     pub(crate) fn state_lock_manual(&self) -> ManuallyDrop<SpinNoIrqGuard<TaskState>> {
         ManuallyDrop::new(self.state.lock())
@@ -179,6 +194,41 @@ impl TaskInner {
     pub(crate) fn set_exit_code(&self, exit_code: i32) {
         self.exit_code.store(exit_code, Ordering::Release)
     }
+
+    #[inline]
+    pub(crate) fn set_ctx_ref(&self, ctx_ref: *mut TaskContext) {
+        self.ctx_ref.store(NonNull::new(ctx_ref).unwrap());
+    }
+
+    #[inline]
+    pub(crate) fn get_ctx_ref(&self) -> *mut NonNull<TaskContext> {
+        self.ctx_ref.as_ptr()
+    }
+
+    #[inline]
+    pub(crate) fn get_ctx(&self) -> *mut TaskContext {
+        self.ctx_ref.load().as_ptr()
+    }
+
+    #[inline]
+    pub(crate) fn is_thread(&self) -> bool {
+        const DANGLE_PTR: usize = core::mem::align_of::<TaskContext>();
+        if self.get_ctx() as usize != DANGLE_PTR {
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    pub(crate) fn swap_owned_stack(&self, new_stack: Option<Arc<TaskStack>>) -> Option<Arc<TaskStack>> {
+        self.owned_stack.swap(new_stack)
+    }
+
+    #[inline]
+    pub(crate) fn get_future(&self) -> *mut Pin<Box<dyn Future<Output = ()> + Send>> {
+        self.future.as_ptr()
+    }
 }
 
 /// pub(crate)方法
@@ -194,15 +244,9 @@ impl TaskInner {
     }
 
     pub(crate) fn new_idle() -> Arc<Task> {
-        struct IdleTaskFuture();
-        impl Future for IdleTaskFuture {
-            type Output = i32;
-        
-            fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<i32> {
-                Poll::Pending
-            }
-        }
-        Self::new_async_raw(IdleTaskFuture { }, true, false)
+        Self::new_async_raw(poll_fn(|_| -> Poll<i32> {
+            Poll::Pending
+        }), true, false)
     }
 
     pub(crate) fn new_init<F>(func: F) -> Arc<Task>
@@ -262,8 +306,9 @@ impl TaskInner {
             is_init,
             state: SpinNoIrq::new(TaskState::Runable),
             exit_code: AtomicI32::new(0),
-            future: Some(AtomicCell::new(Box::pin(func))),
+            future: AtomicCell::new(Box::pin(func)),
             ctx_ref: AtomicCell::new(NonNull::dangling()),
+            owned_stack: AtomicCell::new(None),
         }))
     }
 }

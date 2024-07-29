@@ -241,53 +241,132 @@ core::arch::global_asm!(
 .endif",
 );
 
+// #[naked]
+// /// Switches the context from the current task to the next task.
+// ///
+// /// # Safety
+// ///
+// /// This function is unsafe because it directly manipulates the CPU registers.
+// pub(crate) unsafe extern "C" fn context_switch(_current_task: &mut TaskContext, _next_task: &TaskContext) {
+//     asm!(
+//         "
+//         // save old context (callee-saved registers)
+//         STR     ra, a0, 0
+//         STR     sp, a0, 1
+//         STR     s0, a0, 2
+//         STR     s1, a0, 3
+//         STR     s2, a0, 4
+//         STR     s3, a0, 5
+//         STR     s4, a0, 6
+//         STR     s5, a0, 7
+//         STR     s6, a0, 8
+//         STR     s7, a0, 9
+//         STR     s8, a0, 10
+//         STR     s9, a0, 11
+//         STR     s10, a0, 12
+//         STR     s11, a0, 13
+
+//         // restore new context
+//         LDR     s11, a1, 13
+//         LDR     s10, a1, 12
+//         LDR     s9, a1, 11
+//         LDR     s8, a1, 10
+//         LDR     s7, a1, 9
+//         LDR     s6, a1, 8
+//         LDR     s5, a1, 7
+//         LDR     s4, a1, 6
+//         LDR     s3, a1, 5
+//         LDR     s2, a1, 4
+//         LDR     s1, a1, 3
+//         LDR     s0, a1, 2
+//         LDR     sp, a1, 1
+//         LDR     ra, a1, 0
+
+//         ret",
+//         options(noreturn),
+//     )
+// }
+
+use core::ptr::NonNull;
+use super::switch::schedule_with_sp_change;
+
+const TASKCONTEXT_SIZE: usize = core::mem::size_of::<TaskContext>();
+
 #[naked]
-/// Switches the context from the current task to the next task.
-///
-/// # Safety
-///
-/// This function is unsafe because it directly manipulates the CPU registers.
-pub(crate) unsafe extern "C" fn context_switch(_current_task: &mut TaskContext, _next_task: &TaskContext) {
-    asm!(
+// Save the previous context to the stack, and call schedule_with_sp_change().
+// 这个函数是我写的，有较大的出错可能
+pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskContext>, sstatus: usize) {
+    core::arch::asm!(
+        // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S
+        // 在栈上申请空间并移动sp（sp的原值借助sscratch间接存储在TaskContext中）
         "
-        // save old context (callee-saved registers)
-        STR     ra, a0, 0
-        STR     sp, a0, 1
-        STR     s0, a0, 2
-        STR     s1, a0, 3
-        STR     s2, a0, 4
-        STR     s3, a0, 5
-        STR     s4, a0, 6
-        STR     s5, a0, 7
-        STR     s6, a0, 8
-        STR     s7, a0, 9
-        STR     s8, a0, 10
-        STR     s9, a0, 11
-        STR     s10, a0, 12
-        STR     s11, a0, 13
-
-        // restore new context
-        LDR     s11, a1, 13
-        LDR     s10, a1, 12
-        LDR     s9, a1, 11
-        LDR     s8, a1, 10
-        LDR     s7, a1, 9
-        LDR     s6, a1, 8
-        LDR     s5, a1, 7
-        LDR     s4, a1, 6
-        LDR     s3, a1, 5
-        LDR     s2, a1, 4
-        LDR     s1, a1, 3
-        LDR     s0, a1, 2
-        LDR     sp, a1, 1
-        LDR     ra, a1, 0
-
-        ret",
+        csrrw   x0, sscratch, sp
+        addi    sp, sp, -{taskctx_size}
+        ",
+        // 存储通用寄存器
+        "
+        STR     ra, sp, 0
+        STR     t0, sp, 4
+        STR     t1, sp, 5
+        STR     t2, sp, 6
+        STR     s0, sp, 7
+        STR     s1, sp, 8
+        STR     a0, sp, 9
+        STR     a1, sp, 10
+        STR     a2, sp, 11
+        STR     a3, sp, 12
+        STR     a4, sp, 13
+        STR     a5, sp, 14
+        STR     a6, sp, 15
+        STR     a7, sp, 16
+        STR     s2, sp, 17
+        STR     s3, sp, 18
+        STR     s4, sp, 19
+        STR     s5, sp, 20
+        STR     s6, sp, 21
+        STR     s7, sp, 22
+        STR     s8, sp, 23
+        STR     s9, sp, 24
+        STR     s10, sp, 25
+        STR     s11, sp, 26
+        STR     t3, sp, 27
+        STR     t4, sp, 28
+        STR     t5, sp, 29
+        STR     t6, sp, 30
+        STR     sp, sp, 1
+        ",
+        // 存储特殊寄存器
+        // "
+        // csrr    t0, sepc
+        // csrr    t1, sstatus
+        // csrrw   t2, sscratch, zero
+        // STR     t0, sp, 31
+        // STR     t1, sp, 32
+        // STR     t2, sp, 1
+        // .short  0xa622
+        // .short  0xaa26
+        // ",
+        "
+        csrr    t0, sepc
+        csrrw   t2, sscratch, zero
+        STR     t0, sp, 31
+        STR     a1, sp, 32
+        STR     t2, sp, 1
+        .short  0xa622
+        .short  0xaa26
+        ",
+        // a0 -> ctx_ref
+        // sp -> *mut TaskContext
+        "STR     sp, a0, 0",
+        "call {schedule_with_sp_change}",
+        // // The stack has changed, if the next task is a coroutine, the execution will return to here.
+        // // But the ra is not correct.
+        // "ret",
+        taskctx_size = const TASKCONTEXT_SIZE,
+        schedule_with_sp_change = sym schedule_with_sp_change,
         options(noreturn),
     )
 }
-
-use core::ptr::NonNull;
 
 #[naked]
 /// Load the next context from the stack.

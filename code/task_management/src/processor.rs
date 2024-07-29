@@ -37,6 +37,9 @@ pub(crate) struct Processor {
     /// 空闲时执行的任务
     idle_task: Arc<Task>,
 
+    /// 进入任务执行前的原有执行流
+    original_task: Arc<Task>,
+
     /// 用于在任务切换过程中关闭中断与抢占
     switch_guard: UnsafeCell<Option<IrqSave>>
 }
@@ -154,11 +157,6 @@ impl Processor {
         }
     }
 
-    /// 开始运行任务
-    pub(crate) fn run_tasks(&self) -> ! {
-        unimplemented!();
-    }
-
     // /// 切换任务
     // pub(crate) fn coroutine_switch(&self) {
     //     // 目前不知道切换函数是否需要全程在PROCESSOR的锁下进行。
@@ -216,13 +214,15 @@ impl Processor {
 impl Processor {
     // 需要在GLOBAL_SCHEDULER初始化完成后调用
     fn new() -> Self {
-        let idle_task = TaskInner::new_idle();
+        let idle_task = TaskInner::new_idle(); // idle_task不需放入调度器，调度器如果取不到任务就会返回idle_task
+        let original_task = TaskInner::new_original();
         Self {
             local_scheduler: UnsafeCell::new(Scheduler::new()),
             global_scheduler: GLOBAL_SCHEDULER.try_get().unwrap().clone(),
-            current_task: UnsafeCell::new(CurrentTask::new(idle_task.clone())),
+            current_task: UnsafeCell::new(CurrentTask::new(original_task.clone())),
             stack_pool: UnsafeCell::new(StackPool::new()),
             idle_task,
+            original_task,
             switch_guard: UnsafeCell::new(None),
         }
     }

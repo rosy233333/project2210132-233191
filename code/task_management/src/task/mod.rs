@@ -26,6 +26,9 @@ pub struct TaskInner {
     /// If the task is the initial task, the kernel will terminate
     /// when the task exits.
     is_init: bool,
+    /// original任务代表运行任务前、CPU已有的执行流。在该执行流上调用init_processor系列函数。
+    /// 将原本的执行流作为任务保存，是为了之后可以切回该任务，从而使CPU回到该原有执行流。
+    is_original: bool,
 
     // -----可变属性-----
 
@@ -141,6 +144,10 @@ impl TaskInner {
         self.is_init
     }
 
+    #[inline]
+    pub(crate) fn is_original(&self) -> bool {
+        self.is_original
+    }
 
     #[inline]
     /// lock the task state and ctx_ptr access
@@ -235,28 +242,32 @@ impl TaskInner {
 impl TaskInner {
     pub(crate) fn new<F>(func: F) -> Arc<Task>
     where F: (FnOnce() -> i32) + Send + 'static {
-        Self::new_raw(func, false, false)
+        Self::new_raw(func, false, false, false)
     }
 
     pub(crate) fn new_async<F>(func: F) -> Arc<Task>
     where F: Future<Output = i32> + Send + 'static {
-        Self::new_async_raw(func, false, false)
+        Self::new_async_raw(func, false, false, false)
     }
 
     pub(crate) fn new_idle() -> Arc<Task> {
         Self::new_async_raw(poll_fn(|_| -> Poll<i32> {
             Poll::Pending
-        }), true, false)
+        }), true, false, false)
     }
 
     pub(crate) fn new_init<F>(func: F) -> Arc<Task>
     where F: (FnOnce() -> i32) + Send + 'static {
-        Self::new_raw(func, false, true)
+        Self::new_raw(func, false, true, false)
     }
 
     pub(crate) fn new_async_init<F>(func: F) -> Arc<Task>
     where F: Future<Output = i32> + Send + 'static {
-        Self::new_async_raw(func, false, true)
+        Self::new_async_raw(func, false, true, false)
+    }
+
+    pub(crate) fn new_original() -> Arc<Task> {
+        Self::new_raw(|| { 0 }, false, false, true)
     }
 
     pub(crate) fn wakeup(self: Arc<AxTask<Self>>) {
@@ -282,28 +293,29 @@ impl TaskInner {
 
 /// private方法
 impl TaskInner {
-    fn new_raw<F>(func: F, is_idle: bool, is_init: bool) -> Arc<Task>
+    fn new_raw<F>(func: F, is_idle: bool, is_init: bool, is_original: bool) -> Arc<Task>
     where F: (FnOnce() -> i32) + Send + 'static {
         Self::new_async_raw_with_wrapped_func(async { // 将线程转化为协程，从而规避线程与协程的启动方式不同的问题 
             let exit_code = func();
             exit_current(exit_code); // 将任务的自然退出方式也统一为使用exit系列函数
-        }, is_idle, is_init)
+        }, is_idle, is_init, is_original)
     }
 
-    fn new_async_raw<F>(func: F, is_idle: bool, is_init: bool) -> Arc<Task>
+    fn new_async_raw<F>(func: F, is_idle: bool, is_init: bool, is_original: bool) -> Arc<Task>
     where F: Future<Output = i32> + Send + 'static {
         Self::new_async_raw_with_wrapped_func(async { 
             let exit_code = func.await;
             exit_current_async(exit_code).await; // 将任务的自然退出方式也统一为使用exit系列函数。结果：直属于TaskInner的Future不会返回Ready，只会返回Pending。
-        }, is_idle, is_init)
+        }, is_idle, is_init, is_original)
     }
 
-    fn new_async_raw_with_wrapped_func<F>(func: F, is_idle: bool, is_init: bool) -> Arc<Task>
+    fn new_async_raw_with_wrapped_func<F>(func: F, is_idle: bool, is_init: bool, is_original: bool) -> Arc<Task>
     where F: Future<Output = ()> + Send + 'static {
         Arc::new(Task::new(TaskInner {
             id: TaskId::new(),
             is_idle,
             is_init,
+            is_original,
             state: SpinNoIrq::new(TaskState::Runable),
             exit_code: AtomicI32::new(0),
             future: AtomicCell::new(Box::pin(func)),

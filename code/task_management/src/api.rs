@@ -14,8 +14,17 @@ where F: (FnOnce() -> i32) + Send + 'static {
     let main_task = TaskInner::new_init(main_task_fn);
     Processor::with_current(|processor| {
         processor.add_task_to_local(main_task);
-        processor.run_tasks()
-    })
+        let current_task = processor.current_task().get_current_ptr();
+        assert!(current_task.is_original());
+        // 使得现有执行流不会加入调度器
+        current_task.set_state(TaskState::Blocking);
+    });
+
+    // 开始从调度器中取出任务运行。
+    switch_entry(true);
+
+    // unreachable
+    loop { }
 }
 
 #[cfg(feature = "smp")]
@@ -25,8 +34,17 @@ where F: Future<Output = i32> + Send + 'static {
     let main_task = TaskInner::new_async_init(main_task_fn);
     Processor::with_current(|processor| {
         processor.add_task_to_local(main_task);
-        processor.run_tasks()
-    })
+        let current_task = processor.current_task().get_current_ptr();
+        assert!(current_task.is_original());
+        // 使得现有执行流不会加入调度器
+        current_task.set_state(TaskState::Blocking);
+    });
+
+    // 开始从调度器中取出任务运行。
+    switch_entry(true);
+
+    // unreachable
+    loop { }
 }
 
 /// 需要在副处理器上调用，且每个副处理器调用一次。
@@ -36,8 +54,17 @@ where F: Future<Output = i32> + Send + 'static {
 pub fn init_secondary_processor(cpu_id: usize) -> ! {
     Processor::init_secondary_processor(cpu_id);
     Processor::with_current(|processor| {
-        processor.run_tasks()
-    })
+        let current_task = processor.current_task().get_current_ptr();
+        assert!(current_task.is_original());
+        // 使得现有执行流不会加入调度器
+        current_task.set_state(TaskState::Blocking);
+    });
+
+    // 开始从调度器中取出任务运行。
+    switch_entry(true);
+
+    // unreachable
+    loop { }
 }
 
 // ------任务创建------
@@ -110,7 +137,7 @@ pub fn yield_current_to_local() {
         let current = processor.current_task().get_current_ptr();
         assert!(current.is_runable());
     });
-    switch_entry();
+    switch_entry(true);
 }
 pub async fn yield_current_to_local_async() {
     yield_helper().await;
@@ -166,7 +193,7 @@ pub fn exit_current(exit_code: i32) {
             *current_state = TaskState::Exited; // 状态为Exited的任务一定已经保存好了返回值
         }
     });
-    switch_entry();
+    switch_entry(true);
 }
 pub async fn exit_current_async(exit_code: i32) {
     Processor::with_current(|processor| {
@@ -236,7 +263,7 @@ impl BlockQueue {
             }
             self.0.add(current);
         });
-        switch_entry();
+        switch_entry(true);
     }
 
     /// 将当前任务阻塞在该队列上

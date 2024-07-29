@@ -18,13 +18,13 @@ pub(crate) fn preempt_switch_entry(taskctx: &mut TaskContext) {
 }
 
 /// This function is the entrance of activie switching.
-pub(crate) fn switch_entry() {
+pub(crate) fn switch_entry(is_thread: bool) {
     // 因为processor.acquire_switch_guard()会修改sstatus以禁止中断，因此将修改时保存的sstatus原值传入save_prev_ctx()，保存在TaskContext中。
     let (prev_task, sstatus) = Processor::with_current(|processor| {
         processor.acquire_switch_guard();
         (processor.current_task().get_current_ptr(), processor.get_sstatus_in_switch_guard())
     });
-    if prev_task.is_thread() {
+    if is_thread {
         unsafe { save_prev_ctx(&mut *prev_task.get_ctx_ref(), sstatus); } // 该函数会调用schedule_with_sp_change()
     }
     else {
@@ -39,7 +39,9 @@ pub(super) fn schedule_with_sp_change() {
         let new_stack = processor.get_stack_pool_mut().fetch();
         let new_stack_top = new_stack.top();
         let old_stack = processor.get_stack_pool_mut().swap_curr_stack(Some(new_stack));
-        assert!(old_stack.is_some());
+        let current_task = processor.current_task().get_current_ptr();
+        // 此时CPU的current_stack必须为Some，但除了从original task切换到其它任务以外（此时CPU使用的栈不被current_stack管理）。
+        assert!(old_stack.is_some() || current_task.is_original());
         let prev_task = processor.current_task().get_current_ptr();
         assert!(prev_task.swap_owned_stack(old_stack).is_none());
         new_stack_top
@@ -140,8 +142,11 @@ pub(crate) fn run_next() {
             let new_stack = task.swap_owned_stack(None);
             assert!(new_stack.is_some());
             let old_stack = processor.get_stack_pool_mut().swap_curr_stack(new_stack);
-            assert!(old_stack.is_some());
-            unsafe { processor.get_stack_pool_mut().recycle_stack(old_stack.unwrap()); }
+            // original_task持有的栈不被processor数据结构管理
+            assert!(old_stack.is_some() || task.is_original());
+            if old_stack.is_some() {
+                unsafe { processor.get_stack_pool_mut().recycle_stack(old_stack.unwrap()); }
+            }
             processor.release_switch_guard();
         });
         unsafe {

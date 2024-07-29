@@ -1,3 +1,6 @@
 [submodule "code/scheduler"]
 	path = code/scheduler
 	url = https://github.com/rosy233333/scheduler.git
+[submodule "code/kernel_guard"]
+	path = code/kernel_guard
+	url = https://github.com/rosy233333/kernel_guard

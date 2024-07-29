@@ -4,3 +4,9 @@
 [submodule "code/kernel_guard"]
 	path = code/kernel_guard
 	url = https://github.com/rosy233333/kernel_guard
+[submodule "code/dependencies/spinlock"]
+	path = code/dependencies/spinlock
+	url = https://github.com/Starry-OS/spinlock.git
+[submodule "code/dependencies/percpu"]
+	path = code/dependencies/percpu
+	url = https://github.com/Starry-OS/percpu.git

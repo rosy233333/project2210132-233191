@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 cfg-if = "1.0"
-# spinlock = { git = "https://github.com/Starry-OS/spinlock.git" }
 scheduler = { path = "../scheduler" }
 
 [features]

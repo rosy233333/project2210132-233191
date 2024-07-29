@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 task_queues = { path = "../task_queues" }
-spinlock = { git = "https://github.com/Starry-OS/spinlock.git" }
+spinlock = { path = "../dependencies/spinlock" }
 crossbeam = { version = "0.8", default-features = false, features = ["alloc"] }
-percpu = { git = "https://github.com/Starry-OS/percpu.git", optional = true }
+percpu = { path = "../dependencies/percpu", optional = true }
 lazy_init = { git = "https://github.com/Starry-OS/lazy_init.git" }
 # kernel_guard = { git = "https://github.com/Starry-OS/kernel_guard.git" }
 kernel_guard = { path = "../kernel_guard" }

@@ -18,6 +18,8 @@ static PROCESSOR: LazyInit<SpinNoIrq<Processor>> = LazyInit::new();
 static GLOBAL_SCHEDULER: LazyInit<Arc<SpinNoIrq<Scheduler>>> = LazyInit::new();
 
 pub(crate) struct Processor {
+    id: usize,
+
     /// 调度器
     /// 分为局部（当前CPU）调度器和全局（当前地址空间）调度器两级。
     /// CPU获取任务时，优先从局部调度器取出任务，若局部调度器没有任务，则从全局调度器取任务。
@@ -52,6 +54,11 @@ unsafe impl Send for Processor {}
 
 /// 访问各个成员的方法
 impl Processor {
+    #[inline]
+    pub(crate) fn id(&self) -> usize {
+        self.id
+    }
+
     // 注意：不要同时申请多个mut引用。
     #[inline]
     pub(crate) fn with_local_scheduler<F, T>(&self, f: F) -> T
@@ -124,7 +131,7 @@ impl Processor {
             percpu::init(cpu_num);
             percpu::set_local_thread_pointer(cpu_id);
             PROCESSOR.with_current(|processor| {
-                processor.init_by(SpinNoIrq::new(Processor::new()));
+                processor.init_by(SpinNoIrq::new(Processor::new(cpu_id)));
             });
         }
 
@@ -136,7 +143,7 @@ impl Processor {
     pub(crate) fn init_secondary_processor(cpu_id: usize) {
         percpu::set_local_thread_pointer(cpu_id);
         PROCESSOR.with_current(|processor| {
-            processor.init_by(SpinNoIrq::new(Processor::new()));
+            processor.init_by(SpinNoIrq::new(Processor::new(cpu_id)));
         });
     }
 
@@ -213,10 +220,11 @@ impl Processor {
 /// private方法
 impl Processor {
     // 需要在GLOBAL_SCHEDULER初始化完成后调用
-    fn new() -> Self {
+    fn new(id: usize) -> Self {
         let idle_task = TaskInner::new_idle(); // idle_task不需放入调度器，调度器如果取不到任务就会返回idle_task
         let original_task = TaskInner::new_original();
         Self {
+            id,
             local_scheduler: UnsafeCell::new(Scheduler::new()),
             global_scheduler: GLOBAL_SCHEDULER.try_get().unwrap().clone(),
             current_task: UnsafeCell::new(CurrentTask::new(original_task.clone())),

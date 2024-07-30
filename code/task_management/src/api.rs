@@ -67,6 +67,12 @@ pub fn init_secondary_processor(cpu_id: usize) -> ! {
     loop { }
 }
 
+pub fn current_processor_id() -> usize {
+    Processor::with_current(|processor| {
+        processor.id()
+    })
+}
+
 // ------任务创建------
 
 use spinlock::SpinNoIrq;

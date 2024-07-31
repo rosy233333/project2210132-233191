@@ -1,4 +1,4 @@
-use core::{future::{poll_fn, Future}, pin::Pin, task::{Context, Poll}};
+use core::{future::{poll_fn, Future}, ops::DerefMut, pin::Pin, task::{Context, Poll}};
 use alloc::sync::Arc;
 
 // ------处理器初始化------
@@ -27,7 +27,6 @@ where F: (FnOnce() -> i32) + Send + 'static {
     loop { }
 }
 
-#[cfg(feature = "smp")]
 pub fn init_main_processor_with_async<F>(main_task_fn: F, cpu_id: usize, cpu_num: usize) -> !
 where F: Future<Output = i32> + Send + 'static {
     Processor::init_main_processor(cpu_id, cpu_num);
@@ -51,7 +50,10 @@ where F: Future<Output = i32> + Send + 'static {
 /// 需要在init_main_processor执行完成后调用。
 /// 该函数也会初始化处理器，但在向调度器放入任务前，会运行处理器自带的“idle_task”
 /// 从此之后，该cpu的执行流纳入cpu所属调度器的管理中。
+#[cfg(feature = "smp")]
 pub fn init_secondary_processor(cpu_id: usize) -> ! {
+    // use axlog::debug;
+
     Processor::init_secondary_processor(cpu_id);
     Processor::with_current(|processor| {
         let current_task = processor.current_task().get_current_ptr();
@@ -59,6 +61,7 @@ pub fn init_secondary_processor(cpu_id: usize) -> ! {
         // 使得现有执行流不会加入调度器
         current_task.set_state(TaskState::Blocking);
     });
+    // debug!("init_secondary_processor finished");
 
     // 开始从调度器中取出任务运行。
     switch_entry(true);
@@ -126,6 +129,13 @@ pub fn current_ptr() -> Arc<Task> {
     })
 }
 
+/// 获取当前任务的id
+pub fn current_id() -> u64 {
+    Processor::with_current(|processor| {
+        processor.current_task().get_current_ptr().id()
+    })
+}
+
 /// 改变当前任务的优先级
 /// 返回值代表传入的优先级是否合法、修改是否成功
 pub fn change_current_priority(new_priority: isize) -> bool {
@@ -146,6 +156,10 @@ pub fn yield_current_to_local() {
     switch_entry(true);
 }
 pub async fn yield_current_to_local_async() {
+    Processor::with_current(|processor| {
+        let current = processor.current_task().get_current_ptr();
+        assert!(current.is_runable());
+    });
     yield_helper().await;
 }
 
@@ -265,7 +279,7 @@ impl BlockQueue {
             {
                 let mut current_state = current.state_lock();
                 assert!(matches!(*current_state, TaskState::Runable));
-                *current_state = TaskState::Blocking; // 状态为Exited的任务一定已经保存好了返回值
+                *current_state = TaskState::Blocking;
             }
             self.0.add(current);
         });
@@ -281,9 +295,45 @@ impl BlockQueue {
             {
                 let mut current_state = current.state_lock();
                 assert!(matches!(*current_state, TaskState::Runable));
-                *current_state = TaskState::Blocking; // 状态为Exited的任务一定已经保存好了返回值
+                *current_state = TaskState::Blocking;
             }
             self.0.add(current);
+        });
+        yield_helper().await;
+    }
+
+    /// 当阻塞队列被锁保护时，请使用该函数进行阻塞
+    /// 该函数能够保证任务不会在阻塞期间持有队列的锁
+    /// （线程版本）
+    pub fn block_current_with_locked_self<'a, T, F, U>(locked_self: &'a T, lock_fn: F)
+    where F: Fn(&'a T) -> U, U: 'a + DerefMut<Target = Self> + Drop {
+        Processor::with_current(move |processor| {
+            let current = processor.current_task().get_current_ptr();
+            // current_state作用域
+            {
+                let mut current_state = current.state_lock();
+                assert!(matches!(*current_state, TaskState::Runable));
+                *current_state = TaskState::Blocking;
+            }
+            (*lock_fn(&locked_self)).0.add(current);
+        });
+        switch_entry(true);
+    }
+
+    /// 当阻塞队列被锁保护时，请使用该函数进行阻塞
+    /// 该函数能够保证任务不会在阻塞期间持有队列的锁
+    /// （协程版本）
+    pub async fn block_current_async_with_locked_self<'a, T, F, U>(locked_self: &'a T, lock_fn: F)
+    where F: Fn(&'a T) -> U, U: 'a + DerefMut<Target = Self> + Drop {
+        Processor::with_current(move |processor| {
+            let current = processor.current_task().get_current_ptr();
+            // current_state作用域
+            {
+                let mut current_state = current.state_lock();
+                assert!(matches!(*current_state, TaskState::Runable));
+                *current_state = TaskState::Blocking;
+            }
+            (*lock_fn(&locked_self)).0.add(current);
         });
         yield_helper().await;
     }

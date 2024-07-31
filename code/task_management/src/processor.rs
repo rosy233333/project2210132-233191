@@ -1,10 +1,11 @@
-use core::cell::UnsafeCell;
+use core::{cell::UnsafeCell, sync::atomic::Ordering};
 
 use alloc::sync::Arc;
 use kernel_guard::{IrqSave, NoPreemptIrqSave};
 use lazy_init::LazyInit;
 use spinlock::{SpinNoIrq, SpinNoIrqGuard};
 use task_queues::scheduler::{self, BaseScheduler};
+use core::sync::atomic::AtomicBool;
 
 use crate::{stack::StackPool, task::{TaskContext, TaskInner}, Task};
 
@@ -16,6 +17,9 @@ static PROCESSOR: LazyInit<SpinNoIrq<Processor>> = LazyInit::new();
 static PROCESSOR: LazyInit<SpinNoIrq<Processor>> = LazyInit::new();
 
 static GLOBAL_SCHEDULER: LazyInit<Arc<SpinNoIrq<Scheduler>>> = LazyInit::new();
+
+#[cfg(feature = "smp")]
+static MAIN_PROCESSOR_INIT_FINISHED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) struct Processor {
     id: usize,
@@ -125,23 +129,28 @@ impl Processor {
     /// 只包含了初始化CPU和调度器的过程，不包含运行main任务
     pub(crate) fn init_main_processor(cpu_id: usize, cpu_num: usize) {
         GLOBAL_SCHEDULER.init_by(Arc::new(SpinNoIrq::new(Scheduler::new())));
+        GLOBAL_SCHEDULER.lock().init();
 
         #[cfg(feature = "smp")]
         {
-            percpu::init(cpu_num);
-            percpu::set_local_thread_pointer(cpu_id);
+            // arceos启动过程已经初始化了percpu库
+            // percpu::init(cpu_num);
+            // percpu::set_local_thread_pointer(cpu_id);
             PROCESSOR.with_current(|processor| {
                 processor.init_by(SpinNoIrq::new(Processor::new(cpu_id)));
             });
+            MAIN_PROCESSOR_INIT_FINISHED.store(true, Ordering::Release);
         }
 
         #[cfg(not(feature = "smp"))]
-        PROCESSOR.init_by(SpinNoIrq::new(Processor::new()));
+        PROCESSOR.init_by(SpinNoIrq::new(Processor::new(cpu_id)));
     }
 
     #[cfg(feature = "smp")]
     pub(crate) fn init_secondary_processor(cpu_id: usize) {
-        percpu::set_local_thread_pointer(cpu_id);
+        while !MAIN_PROCESSOR_INIT_FINISHED.load(Ordering::Acquire) { } //等待主CPU初始化完成
+        // arceos启动过程已经初始化了percpu库
+        // percpu::set_local_thread_pointer(cpu_id);
         PROCESSOR.with_current(|processor| {
             processor.init_by(SpinNoIrq::new(Processor::new(cpu_id)));
         });
@@ -223,7 +232,7 @@ impl Processor {
     fn new(id: usize) -> Self {
         let idle_task = TaskInner::new_idle(); // idle_task不需放入调度器，调度器如果取不到任务就会返回idle_task
         let original_task = TaskInner::new_original();
-        Self {
+        let processor = Self {
             id,
             local_scheduler: UnsafeCell::new(Scheduler::new()),
             global_scheduler: GLOBAL_SCHEDULER.try_get().unwrap().clone(),
@@ -232,6 +241,10 @@ impl Processor {
             idle_task,
             original_task,
             switch_guard: UnsafeCell::new(None),
+        };
+        unsafe {
+            (&mut *processor.local_scheduler.get()).init();
         }
+        processor
     }
 }

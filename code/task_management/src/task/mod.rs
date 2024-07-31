@@ -1,5 +1,6 @@
 use core::{future::{poll_fn, Future, Pending}, mem::ManuallyDrop, pin::Pin, ptr::NonNull, sync::atomic::{AtomicI32, AtomicU64, Ordering}, task::Poll};
 use alloc::{boxed::Box, sync::Arc};
+use axlog::debug;
 use spinlock::{SpinNoIrq, SpinNoIrqGuard};
 use crossbeam::atomic::AtomicCell;
 use task_queues::scheduler::AxTask;
@@ -252,6 +253,7 @@ impl TaskInner {
 
     pub(crate) fn new_idle() -> Arc<Task> {
         Self::new_async_raw(poll_fn(|_| -> Poll<i32> {
+            debug!("run idle task");
             Poll::Pending
         }), true, false, false)
     }

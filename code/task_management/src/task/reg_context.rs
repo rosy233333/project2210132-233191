@@ -44,7 +44,7 @@ use riscv::register::sstatus::{self, Sstatus};
 #[allow(missing_docs)]
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct GeneralRegisters {
+pub struct GeneralRegisters {
     pub ra: usize,
     pub sp: usize,
     pub gp: usize, // only valid for user traps
@@ -295,7 +295,7 @@ const TASKCONTEXT_SIZE: usize = core::mem::size_of::<TaskContext>();
 #[naked]
 // Save the previous context to the stack, and call schedule_with_sp_change().
 // 这个函数是我写的，有较大的出错可能
-pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskContext>, sstatus: usize) {
+pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskContext>, s_irq_flag: usize) {
     core::arch::asm!(
         // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S
         // 在栈上申请空间并移动sp（sp的原值借助sscratch间接存储在TaskContext中）
@@ -336,21 +336,14 @@ pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskCon
         STR     sp, sp, 1
         ",
         // 存储特殊寄存器
-        // "
-        // csrr    t0, sepc
-        // csrr    t1, sstatus
-        // csrrw   t2, sscratch, zero
-        // STR     t0, sp, 31
-        // STR     t1, sp, 32
-        // STR     t2, sp, 1
-        // .short  0xa622
-        // .short  0xaa26
-        // ",
+        // or      t1, t1, a1 是为了恢复原本的中断使能位
         "
         csrr    t0, sepc
+        csrr    t1, sstatus
+        or      t1, t1, a1
         csrrw   t2, sscratch, zero
         STR     t0, sp, 31
-        STR     a1, sp, 32
+        STR     t1, sp, 32
         STR     t2, sp, 1
         .short  0xa622
         .short  0xaa26
@@ -413,7 +406,11 @@ pub(crate) unsafe extern "C" fn load_next_ctx(next_ctx_ref: &mut NonNull<TaskCon
         LDR     t5, sp, 29
         LDR     t6, sp, 30
         LDR     sp, sp, 1
-        sret",
+        ",
+        // TODO: 这句原本是sret，用于中断返回。之后添加中断支持后，将线程yield与中断打断结合，再改回sret
+        "
+        ret
+        ",
         options(noreturn),
     )
 }

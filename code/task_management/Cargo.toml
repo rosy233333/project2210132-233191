@@ -11,6 +11,8 @@ percpu = { path = "../dependencies/percpu", optional = true }
 lazy_init = { git = "https://github.com/Starry-OS/lazy_init.git" }
 # kernel_guard = { git = "https://github.com/Starry-OS/kernel_guard.git" }
 kernel_guard = { path = "../kernel_guard" }
+axlog = { git = "https://github.com/Starry-OS/axlog.git" }
+
 
 # [target.'cfg(any(target_arch = "riscv32", target_arch = "riscv64"))'.dependencies]
 riscv = "0.11"

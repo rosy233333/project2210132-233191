@@ -10,3 +10,6 @@
 [submodule "code/dependencies/percpu"]
 	path = code/dependencies/percpu
 	url = https://github.com/Starry-OS/percpu.git
+[submodule "Starry"]
+	path = Starry
+	url = https://github.com/rosy233333/Starry.git

@@ -1,42 +1,4 @@
 use core::arch::asm;
-// use memory_addr::VirtAddr;
-
-// #[cfg(not(feature = "async"))]
-// /// Saved hardware states of a task.
-// ///
-// /// The context usually includes:
-// ///
-// /// - Callee-saved registers
-// /// - Stack pointer register
-// /// - Thread pointer register (for thread-local storage, currently unsupported)
-// /// - FP/SIMD registers
-// ///
-// /// On context switch, current task saves its context from CPU to memory,
-// /// and the next task restores its context from memory to CPU.
-// #[allow(missing_docs)]
-// #[repr(C)]
-// #[derive(Debug, Default)]
-// pub struct TaskContext {
-//     pub ra: usize, // return address (x1)
-//     pub sp: usize, // stack pointer (x2)
-
-//     pub s0: usize, // x8-x9
-//     pub s1: usize,
-
-//     pub s2: usize, // x18-x27
-//     pub s3: usize,
-//     pub s4: usize,
-//     pub s5: usize,
-//     pub s6: usize,
-//     pub s7: usize,
-//     pub s8: usize,
-//     pub s9: usize,
-//     pub s10: usize,
-//     pub s11: usize,
-
-//     pub tp: usize,
-//     // TODO: FP states
-// }
 
 use riscv::register::sstatus::{self, Sstatus};
 
@@ -93,28 +55,28 @@ pub struct TaskContext {
 }
 
 impl TaskContext {
-    pub fn set_user_sp(&mut self, user_sp: usize) {
-        self.regs.sp = user_sp;
-    }
+    // pub fn set_user_sp(&mut self, user_sp: usize) {
+    //     self.regs.sp = user_sp;
+    // }
 
-    /// 用于第一次进入应用程序时的初始化
-    pub fn app_init_context(app_entry: usize, user_sp: usize) -> Self {
-        let sstatus = sstatus::read();
-        // 当前版本的riscv不支持使用set_spp函数，需要手动修改
-        // 修改当前的sstatus为User，即是第8位置0
-        let mut trap_frame = TaskContext::default();
-        trap_frame.set_user_sp(user_sp);
-        trap_frame.sepc = app_entry;
-        trap_frame.sstatus =
-            unsafe { (*(&sstatus as *const Sstatus as *const usize) & !(1 << 8)) & !(1 << 1) };
-        unsafe {
-            // a0为参数个数
-            // a1存储的是用户栈底，即argv
-            trap_frame.regs.a0 = *(user_sp as *const usize);
-            trap_frame.regs.a1 = *(user_sp as *const usize).add(1);
-        }
-        trap_frame
-    }
+    // /// 用于第一次进入应用程序时的初始化
+    // pub fn app_init_context(app_entry: usize, user_sp: usize) -> Self {
+    //     let sstatus = sstatus::read();
+    //     // 当前版本的riscv不支持使用set_spp函数，需要手动修改
+    //     // 修改当前的sstatus为User，即是第8位置0
+    //     let mut trap_frame = TaskContext::default();
+    //     trap_frame.set_user_sp(user_sp);
+    //     trap_frame.sepc = app_entry;
+    //     trap_frame.sstatus =
+    //         unsafe { (*(&sstatus as *const Sstatus as *const usize) & !(1 << 8)) & !(1 << 1) };
+    //     unsafe {
+    //         // a0为参数个数
+    //         // a1存储的是用户栈底，即argv
+    //         trap_frame.regs.a0 = *(user_sp as *const usize);
+    //         trap_frame.regs.a1 = *(user_sp as *const usize).add(1);
+    //     }
+    //     trap_frame
+    // }
 
     /// 设置返回值
     pub fn set_ret_code(&mut self, ret_value: usize) {
@@ -195,18 +157,18 @@ impl TaskContext {
         unsafe { core::mem::MaybeUninit::zeroed().assume_init() }
     }
 
-    /// Initializes the context for a new task, with the given entry point and
-    /// kernel stack.
-    pub fn init(&mut self, entry: usize, kstack_top: usize, tls_area: usize) {
-        self.regs.sp = kstack_top;
-        self.regs.ra = entry;
-        self.regs.tp = tls_area;
-        // #[cfg(not(feature = "async"))] {
-        //     self.sp = kstack_top.as_usize();
-        //     self.ra = entry;
-        //     self.tp = tls_area.as_usize();
-        // }
-    }
+    // /// Initializes the context for a new task, with the given entry point and
+    // /// kernel stack.
+    // pub fn init(&mut self, entry: usize, kstack_top: usize, tls_area: usize) {
+    //     self.regs.sp = kstack_top;
+    //     self.regs.ra = entry;
+    //     self.regs.tp = tls_area;
+    //     // #[cfg(not(feature = "async"))] {
+    //     //     self.sp = kstack_top.as_usize();
+    //     //     self.ra = entry;
+    //     //     self.tp = tls_area.as_usize();
+    //     // }
+    // }
 }
 
 #[cfg(target_arch = "riscv32")]
@@ -241,52 +203,6 @@ core::arch::global_asm!(
 .endif",
 );
 
-// #[naked]
-// /// Switches the context from the current task to the next task.
-// ///
-// /// # Safety
-// ///
-// /// This function is unsafe because it directly manipulates the CPU registers.
-// pub(crate) unsafe extern "C" fn context_switch(_current_task: &mut TaskContext, _next_task: &TaskContext) {
-//     asm!(
-//         "
-//         // save old context (callee-saved registers)
-//         STR     ra, a0, 0
-//         STR     sp, a0, 1
-//         STR     s0, a0, 2
-//         STR     s1, a0, 3
-//         STR     s2, a0, 4
-//         STR     s3, a0, 5
-//         STR     s4, a0, 6
-//         STR     s5, a0, 7
-//         STR     s6, a0, 8
-//         STR     s7, a0, 9
-//         STR     s8, a0, 10
-//         STR     s9, a0, 11
-//         STR     s10, a0, 12
-//         STR     s11, a0, 13
-
-//         // restore new context
-//         LDR     s11, a1, 13
-//         LDR     s10, a1, 12
-//         LDR     s9, a1, 11
-//         LDR     s8, a1, 10
-//         LDR     s7, a1, 9
-//         LDR     s6, a1, 8
-//         LDR     s5, a1, 7
-//         LDR     s4, a1, 6
-//         LDR     s3, a1, 5
-//         LDR     s2, a1, 4
-//         LDR     s1, a1, 3
-//         LDR     s0, a1, 2
-//         LDR     sp, a1, 1
-//         LDR     ra, a1, 0
-
-//         ret",
-//         options(noreturn),
-//     )
-// }
-
 use core::ptr::NonNull;
 use super::switch::schedule_with_sp_change;
 
@@ -294,7 +210,6 @@ const TASKCONTEXT_SIZE: usize = core::mem::size_of::<TaskContext>();
 
 #[naked]
 // Save the previous context to the stack, and call schedule_with_sp_change().
-// 这个函数是我写的，有较大的出错可能
 pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskContext>, s_irq_flag: usize) {
     core::arch::asm!(
         // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S

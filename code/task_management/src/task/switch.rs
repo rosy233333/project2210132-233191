@@ -38,7 +38,7 @@ pub(crate) fn switch_entry(is_thread: bool) {
     if is_thread {
         // // debug
         // error!("task {id} save context");
-        unsafe { save_prev_ctx(&mut *prev_task.get_ctx_ref(), s_irq_flag); } // 该函数会调用schedule_with_sp_change()
+        unsafe { save_prev_ctx(&mut *prev_task.get_ctx_ref()); } // 该函数会调用schedule_with_sp_change()
     }
     else {
         schedule_without_sp_change();

@@ -1,4 +1,4 @@
-use core::arch::asm;
+use core::arch::{asm, global_asm};
 
 use riscv::register::sstatus::{self, Sstatus};
 
@@ -172,7 +172,7 @@ impl TaskContext {
 }
 
 #[cfg(target_arch = "riscv32")]
-core::arch::global_asm!(
+global_asm!(
     r"
 .ifndef XLENB
 .equ XLENB, 4
@@ -188,7 +188,7 @@ core::arch::global_asm!(
 );
 
 #[cfg(target_arch = "riscv64")]
-core::arch::global_asm!(
+global_asm!(
     r"
 .ifndef XLENB
 .equ XLENB, 8
@@ -208,18 +208,40 @@ use super::switch::schedule_with_sp_change;
 
 const TASKCONTEXT_SIZE: usize = core::mem::size_of::<TaskContext>();
 
-#[naked]
-// Save the previous context to the stack, and call schedule_with_sp_change().
-pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskContext>, s_irq_flag: usize) {
-    core::arch::asm!(
-        // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S
-        // 在栈上申请空间并移动sp（sp的原值借助sscratch间接存储在TaskContext中）
-        "
-        csrrw   x0, sscratch, sp
-        addi    sp, sp, -{taskctx_size}
-        ",
-        // 存储通用寄存器
-        "
+//
+global_asm!(
+    // 将当前的CPU上下文以线程上下文形式存储于sp指向的TaskContext结构中
+    // TaskContext结构的sp字段将保存sscratch寄存器的值，并清零sscratch
+    "
+    .macro SAVE_THREAD_CTX
+        STR     ra, sp, 0
+        STR     s0, sp, 7
+        STR     s1, sp, 8
+        STR     s2, sp, 17
+        STR     s3, sp, 18
+        STR     s4, sp, 19
+        STR     s5, sp, 20
+        STR     s6, sp, 21
+        STR     s7, sp, 22
+        STR     s8, sp, 23
+        STR     s9, sp, 24
+        STR     s10, sp, 25
+        STR     s11, sp, 26
+        csrrw   t2, sscratch, zero
+        STR     t2, sp, 1
+
+        li      t0, 0
+        STR     t0, sp, 31
+        STR     t0, sp, 32
+
+        .short  0xa622
+        .short  0xaa26
+    .endm
+    ",
+    // 将当前的CPU上下文以trap上下文形式存储于sp指向的TaskContext结构中
+    // TaskContext结构的sp字段将保存sscratch寄存器的值
+    "
+    .macro SAVE_TRAP_CTX
         STR     ra, sp, 0
         STR     t0, sp, 4
         STR     t1, sp, 5
@@ -248,50 +270,32 @@ pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskCon
         STR     t4, sp, 28
         STR     t5, sp, 29
         STR     t6, sp, 30
-        STR     sp, sp, 1
-        ",
-        // 存储特殊寄存器
-        // or      t1, t1, a1 是为了恢复原本的中断使能位
-        "
+        csrrw   t2, sscratch, zero
+        STR     t2, sp, 1
+
         csrr    t0, sepc
         csrr    t1, sstatus
-        or      t1, t1, a1
-        csrrw   t2, sscratch, zero
         STR     t0, sp, 31
         STR     t1, sp, 32
-        STR     t2, sp, 1
+
         .short  0xa622
         .short  0xaa26
-        ",
-        // a0 -> ctx_ref
-        // sp -> *mut TaskContext
-        "STR     sp, a0, 0",
-        "call {schedule_with_sp_change}",
-        // // The stack has changed, if the next task is a coroutine, the execution will return to here.
-        // // But the ra is not correct.
-        // "ret",
-        taskctx_size = const TASKCONTEXT_SIZE,
-        schedule_with_sp_change = sym schedule_with_sp_change,
-        options(noreturn),
-    )
-}
-
-#[naked]
-/// Load the next context from the stack.
-pub(crate) unsafe extern "C" fn load_next_ctx(next_ctx_ref: &mut NonNull<TaskContext>) {
-    core::arch::asm!(
-        "LDR     sp, a0, 0",
-        "li      a1, 8",
-        "STR     a1, a0, 0",
-        "
+    .endm
+    ",
+    // 从sp指向的TaskContext结构中恢复上下文，无论其为线程上下文还是trap上下文
+    // 该宏的执行会改变sp的值
+    "
+    .macro LOAD_CTX_AND_RETURN
         LDR     t0, sp, 31
         LDR     t1, sp, 32
+        beqz    t0, 2f
+
         csrw    sepc, t0
         csrw    sstatus, t1
+
         .short  0x2432
         .short  0x24d2
-        ",
-        "
+
         LDR     ra, sp, 0
         LDR     t0, sp, 4
         LDR     t1, sp, 5
@@ -321,11 +325,64 @@ pub(crate) unsafe extern "C" fn load_next_ctx(next_ctx_ref: &mut NonNull<TaskCon
         LDR     t5, sp, 29
         LDR     t6, sp, 30
         LDR     sp, sp, 1
-        ",
-        // TODO: 这句原本是sret，用于中断返回。之后添加中断支持后，将线程yield与中断打断结合，再改回sret
-        "
+
+        sret
+
+    2:
+        .short  0x2432
+        .short  0x24d2
+
+        LDR     ra, sp, 0
+        LDR     s0, sp, 7
+        LDR     s1, sp, 8
+        LDR     s2, sp, 17
+        LDR     s3, sp, 18
+        LDR     s4, sp, 19
+        LDR     s5, sp, 20
+        LDR     s6, sp, 21
+        LDR     s7, sp, 22
+        LDR     s8, sp, 23
+        LDR     s9, sp, 24
+        LDR     s10, sp, 25
+        LDR     s11, sp, 26
+        LDR     sp, sp, 1
+
         ret
+    .endm
+    "
+);
+
+#[naked]
+// Save the previous context to the stack, and call schedule_with_sp_change().
+pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskContext>) {
+    core::arch::asm!(
+        // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S
+        // 在栈上申请空间并移动sp（sp的原值借助sscratch间接存储在TaskContext中）
+        "
+        csrw    sscratch, sp
+        addi    sp, sp, -{taskctx_size}
         ",
+        "SAVE_THREAD_CTX",
+        // a0 -> ctx_ref
+        // sp -> *mut TaskContext
+        "STR    sp, a0, 0",
+        "call   {schedule_with_sp_change}",
+        taskctx_size = const TASKCONTEXT_SIZE,
+        schedule_with_sp_change = sym schedule_with_sp_change,
+        options(noreturn),
+    )
+}
+
+#[naked]
+/// Load the next context from the stack.
+pub(crate) unsafe extern "C" fn load_next_ctx(next_ctx_ref: &mut NonNull<TaskContext>) {
+    core::arch::asm!(
+        "
+        LDR     sp, a0, 0
+        li      a1, 8
+        STR     a1, a0, 0
+        ",
+        "LOAD_CTX_AND_RETURN",
         options(noreturn),
     )
 }

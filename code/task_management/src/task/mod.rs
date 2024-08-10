@@ -9,7 +9,7 @@ mod reg_context;
 mod switch;
 mod waker;
 
-pub(crate) use reg_context::TaskContext;
+pub use reg_context::TaskContext;
 pub(crate) use switch::{preempt_switch_entry, switch_entry};
 
 use crate::{exit_current, exit_current_async, processor::Processor, stack::TaskStack};

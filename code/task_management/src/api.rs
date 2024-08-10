@@ -1,5 +1,7 @@
-use core::{future::{poll_fn, Future}, ops::DerefMut, pin::Pin, task::{Context, Poll}};
+use core::{future::{poll_fn, Future}, ops::DerefMut, task::Poll};
 use alloc::sync::Arc;
+
+pub use crate::task::TaskContext;
 
 // ------处理器初始化------
 
@@ -79,7 +81,7 @@ pub fn current_processor_id() -> usize {
 // ------任务创建------
 
 use spinlock::SpinNoIrq;
-use crate::{processor::{self, Processor}, task::{preempt_switch_entry, switch_entry, TaskContext, TaskInner, TaskState}};
+use crate::{processor::{self, Processor}, task::{preempt_switch_entry, switch_entry, TaskInner, TaskState}};
 pub use crate::task::Task;
 
 /// 创建任务并加入全局的调度器

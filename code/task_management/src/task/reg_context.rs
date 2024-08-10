@@ -98,8 +98,13 @@ impl TaskContext {
         self.sepc = pc;
     }
 
+    /// pc 前进 syscall 指令的长度
+    pub fn step_sepc(&mut self) {
+        self.sepc += 4;
+    }
+
     /// pc 倒退到 syscall 指令的长度
-    pub fn rewind_pc(&mut self) {
+    pub fn rewind_sepc(&mut self) {
         self.sepc -= 4;
     }
 

@@ -1,0 +1,22 @@
+[package]
+name = "trap_handler"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+riscv = "0.11"
+task_management = { path = "../task_management", default-features = false }
+lazy_init = { git = "https://github.com/Starry-OS/lazy_init.git" }
+spinlock = { path = "../dependencies/spinlock" }
+axlog = { git = "https://github.com/Starry-OS/axlog", optional = true }
+sbi-rt = "0.0.3"
+crate_interface = { version = "0.1.3", optional = true }
+percpu = { path = "../dependencies/percpu", optional = true }
+
+[features]
+smp = [ "task_management/smp", "percpu" ]
+timer = [ "crate_interface" ]
+preempt = [ "task_management/preempt", "timer" ]
+log = [ "axlog" ]
+
+default = ["smp", "preempt", "log"]

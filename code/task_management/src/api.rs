@@ -1,24 +1,33 @@
 use core::{future::{poll_fn, Future}, ops::DerefMut, task::Poll};
 use alloc::sync::Arc;
+#[cfg(feature = "preempt")]
+use kernel_guard::KernelGuardIf;
+use riscv::register::sstatus;
 
 pub use crate::task::TaskContext;
 
 // ------处理器初始化------
 
 /// 需要在主处理器上调用，且仅调用一次。
-/// 这两个函数会初始化函数运行的处理器，然后开始运行主任务。
+/// 初始化函数运行的处理器。
+#[no_mangle]
+pub fn init_main_processor(cpu_id: usize, cpu_num: usize) {
+    Processor::init_main_processor(cpu_id, cpu_num);
+}
+
+/// 需要在主处理器上调用，且仅调用一次。
+/// 启动主处理器，使其运行任务
 /// 从此之后，该cpu的执行流纳入cpu所属调度器的管理中。
 /// 传入cpu_id和cpu_num是初始化per_cpu库的要求。
 /// TODO: 暂未考虑main_task执行完成后，系统停止的问题，因此该函数不会返回。
-pub fn init_main_processor<F>(main_task_fn: F, cpu_id: usize, cpu_num: usize) -> !
+pub fn start_main_processor<F>(main_task_fn: F) -> !
 where F: (FnOnce() -> i32) + Send + 'static {
-    Processor::init_main_processor(cpu_id, cpu_num);
     let main_task = TaskInner::new_init(main_task_fn);
     Processor::with_current(|processor| {
         processor.add_task_to_local(main_task);
         let current_task = processor.current_task().get_current_ptr();
         assert!(current_task.is_original());
-        // 使得现有执行流不会加入调度器
+        // 使得original task不会加入调度器
         current_task.set_state(TaskState::Blocking);
     });
 
@@ -29,9 +38,8 @@ where F: (FnOnce() -> i32) + Send + 'static {
     loop { }
 }
 
-pub fn init_main_processor_with_async<F>(main_task_fn: F, cpu_id: usize, cpu_num: usize) -> !
+pub fn start_main_processor_with_async<F>(main_task_fn: F) -> !
 where F: Future<Output = i32> + Send + 'static {
-    Processor::init_main_processor(cpu_id, cpu_num);
     let main_task = TaskInner::new_async_init(main_task_fn);
     Processor::with_current(|processor| {
         processor.add_task_to_local(main_task);
@@ -40,7 +48,7 @@ where F: Future<Output = i32> + Send + 'static {
         // 使得现有执行流不会加入调度器
         current_task.set_state(TaskState::Blocking);
     });
-
+    
     // 开始从调度器中取出任务运行。
     switch_entry(true);
 
@@ -48,15 +56,16 @@ where F: Future<Output = i32> + Send + 'static {
     loop { }
 }
 
-/// 需要在副处理器上调用，且每个副处理器调用一次。
-/// 需要在init_main_processor执行完成后调用。
-/// 该函数也会初始化处理器，但在向调度器放入任务前，会运行处理器自带的“idle_task”
-/// 从此之后，该cpu的执行流纳入cpu所属调度器的管理中。
+/// 初始化副处理器
 #[cfg(feature = "smp")]
-pub fn init_secondary_processor(cpu_id: usize) -> ! {
-    // use axlog::debug;
-
+pub fn init_secondary_processor(cpu_id: usize) {
     Processor::init_secondary_processor(cpu_id);
+}
+
+/// 启动副处理器，使其运行任务
+#[cfg(feature = "smp")]
+pub fn start_secondary_processor() -> ! {
+
     Processor::with_current(|processor| {
         let current_task = processor.current_task().get_current_ptr();
         assert!(current_task.is_original());
@@ -120,6 +129,81 @@ where F: Future<Output = i32> + Send + 'static {
     task
 }
 
+/// 代表设置的优先级无效的错误
+pub struct InvalidPriorityError;
+
+/// 在创建时设置了优先级的版本，如果设置的优先级无效则不会创建，并返回Err。
+pub fn spawn_to_global_with_priority<F>(f: F, priority: isize) -> Result<Arc<Task>, InvalidPriorityError>
+where F: (FnOnce() -> i32) + Send + 'static {
+    let task = TaskInner::new(f);
+    let success = Processor::with_current(|processor| {
+        let success = processor.with_local_scheduler(|scheduler| scheduler.set_priority(&task, priority));
+        if success {
+            processor.add_task_to_global(task.clone());
+        }
+        success
+    });
+    if success {
+        Ok(task)
+    }
+    else {
+        Err(InvalidPriorityError)
+    }
+}
+pub fn spawn_to_global_async_with_priority<F>(f: F, priority: isize) -> Result<Arc<Task>, InvalidPriorityError>
+where F: Future<Output = i32> + Send + 'static {
+    let task = TaskInner::new_async(f);
+    let success = Processor::with_current(|processor| {
+        let success = processor.with_local_scheduler(|scheduler| scheduler.set_priority(&task, priority));
+        if success {
+            processor.add_task_to_global(task.clone());
+        }
+        success
+    });
+    if success {
+        Ok(task)
+    }
+    else {
+        Err(InvalidPriorityError)
+    }
+}
+
+/// 创建任务并加入当前CPU的调度器
+pub fn spawn_to_local_with_priority<F>(f: F, priority: isize) -> Result<Arc<Task>, InvalidPriorityError>
+where F: (FnOnce() -> i32) + Send + 'static {
+    let task = TaskInner::new(f);
+    let success = Processor::with_current(|processor| {
+        let success = processor.with_local_scheduler(|scheduler| scheduler.set_priority(&task, priority));
+        if success {
+            processor.add_task_to_local(task.clone());
+        }
+        success
+    });
+    if success {
+        Ok(task)
+    }
+    else {
+        Err(InvalidPriorityError)
+    }
+}
+pub fn spawn_to_local_async_with_priority<F>(f: F, priority: isize) -> Result<Arc<Task>, InvalidPriorityError>
+where F: Future<Output = i32> + Send + 'static {
+    let task = TaskInner::new_async(f);
+    let success = Processor::with_current(|processor| {
+        let success = processor.with_local_scheduler(|scheduler| scheduler.set_priority(&task, priority));
+        if success {
+            processor.add_task_to_local(task.clone());
+        }
+        success
+    });
+    if success {
+        Ok(task)
+    }
+    else {
+        Err(InvalidPriorityError)
+    }
+}
+
 // ------当前任务管理------
 
 /// 获取当前任务的Arc实例
@@ -140,12 +224,18 @@ pub fn current_id() -> u64 {
 
 /// 改变当前任务的优先级
 /// 返回值代表传入的优先级是否合法、修改是否成功
-pub fn change_current_priority(new_priority: isize) -> bool {
+pub fn change_current_priority(new_priority: isize) -> Result<(), InvalidPriorityError> {
     Processor::with_current(|processor| {
         let current = processor.current_task().get_current_ptr();
-        processor.with_local_scheduler(|scheduler| {
+        let success = processor.with_local_scheduler(|scheduler| {
             scheduler.set_priority(&current, new_priority)
-        })
+        });
+        if success {
+            Ok(())
+        }
+        else {
+            Err(InvalidPriorityError)
+        }
     })
 }
 
@@ -235,13 +325,70 @@ pub async fn exit_current_async(exit_code: i32) {
 // /// 等待另一任务完成，并接收其返回值
 // /// 设想是，在join时，使等待任务获取被等待任务的Arc实例，等到获取了该任务的返回值再释放该实例。
 // pub fn current_join_another(task: Arc<Task>) -> i32
-// pub async fn current_join_another_async(task: Arc<Task>)
+// pub async fn current_join_another_async(task: Arc<Task>) -> i32
+
+/// 在当前CPU上执行每个tick（时钟中断）执行的、更新调度器状态和判断重调度。
+/// 返回值表示是否需要重调度
+pub fn scheduler_tick_current() -> bool {
+    Processor::with_current(|processor| {
+        processor.scheduler_tick()
+    })
+}
+
+// ------抢占相关------
+
+#[cfg(feature = "preempt")]
+pub struct KernelGuardImpl;
+
+#[cfg(feature = "preempt")]
+#[crate_interface::impl_interface]
+impl KernelGuardIf for KernelGuardImpl {
+    fn disable_preempt() {
+        current_disable_preempt()
+    }
+
+    fn enable_preempt() {
+        current_enable_preempt()
+    }
+}
+
+#[cfg(feature = "preempt")]
+pub fn current_disable_preempt() {
+    // KernelGuardIf可能在CPU初始化前就被调用
+    if Processor::current_is_init() {
+        Processor::with_current(|processor| {
+            let current = processor.current_task().get_current_ptr();
+            current.increase_preempt_disable_count();
+        })
+    }
+}
+
+#[cfg(feature = "preempt")]
+pub fn current_enable_preempt() {
+    // KernelGuardIf可能在CPU初始化前就被调用
+    if Processor::current_is_init() {
+        Processor::with_current(|processor| {
+            let current = processor.current_task().get_current_ptr();
+            current.decrease_preempt_disable_count();
+        })
+    }
+}
+
+#[cfg(feature = "preempt")]
+pub fn current_can_preempt() -> bool {
+    Processor::with_current(|processor| {
+        let current = processor.current_task().get_current_ptr();
+        current.get_preempt_disable_count() == 0
+    })
+}
+
 
 /// 抢占当前任务
 /// 传入的参数为中断时保存的Trap上下文，之后会将其作为任务上下文保存，这样恢复时可以直接恢复到任务中。
 /// 被抢占的任务只能放回当前CPU的局部调度器。
 /// 目前，该接口仅为中断处理函数准备。
-pub fn premmpt_current(task_ctx: &mut TaskContext) {
+#[cfg(feature = "preempt")]
+pub fn preempt_current(task_ctx: &mut TaskContext) {
     Processor::with_current(|processor| {
         let current = processor.current_task().get_current_ptr();
         assert!(current.is_runable());

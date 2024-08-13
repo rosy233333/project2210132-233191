@@ -3,7 +3,7 @@ use core::{cell::UnsafeCell, sync::atomic::Ordering};
 use alloc::sync::Arc;
 use kernel_guard::{IrqSave, NoPreemptIrqSave};
 use lazy_init::LazyInit;
-use spinlock::{SpinNoIrq, SpinNoIrqGuard};
+use spinlock::{SpinNoIrq, SpinNoIrqGuard, SpinNoIrqOnly};
 use task_queues::scheduler::{self, BaseScheduler};
 use core::sync::atomic::AtomicBool;
 
@@ -11,12 +11,12 @@ use crate::{stack::StackPool, task::{TaskContext, TaskInner}, Task};
 
 #[cfg(feature = "smp")]
 #[percpu::def_percpu]
-static PROCESSOR: LazyInit<SpinNoIrq<Processor>> = LazyInit::new();
+static PROCESSOR: LazyInit<SpinNoIrqOnly<Processor>> = LazyInit::new();
 
 #[cfg(not(feature = "smp"))]
-static PROCESSOR: LazyInit<SpinNoIrq<Processor>> = LazyInit::new();
+static PROCESSOR: LazyInit<SpinNoIrqOnly<Processor>> = LazyInit::new();
 
-static GLOBAL_SCHEDULER: LazyInit<Arc<SpinNoIrq<Scheduler>>> = LazyInit::new();
+static GLOBAL_SCHEDULER: LazyInit<Arc<SpinNoIrqOnly<Scheduler>>> = LazyInit::new();
 
 #[cfg(feature = "smp")]
 static MAIN_PROCESSOR_INIT_FINISHED: AtomicBool = AtomicBool::new(false);
@@ -31,7 +31,7 @@ pub(crate) struct Processor {
     /// `spawn`、`wake`、`yield`系列方法都提供了将任务加入全局调度器的版本。
     /// 在unikernel下，所有CPU使用同一个静态的全局调度器。之后支持宏内核时，可以将全局调度器与hypervisor、os、进程绑定，在切换hypervisor、os、进程时，同时切换CPU的全局调度器。该设计也使得同一时间，不同核心可以使用不同的全局调度器、运行不同的进程。
     local_scheduler: UnsafeCell<Scheduler>,
-    global_scheduler: Arc<SpinNoIrq<Scheduler>>,
+    global_scheduler: Arc<SpinNoIrqOnly<Scheduler>>,
 
     /// 当前任务
     current_task: UnsafeCell<CurrentTask>,
@@ -128,7 +128,7 @@ impl Processor {
     /// 使用percpu库初始化静态变量
     /// 只包含了初始化CPU和调度器的过程，不包含运行main任务
     pub(crate) fn init_main_processor(cpu_id: usize, cpu_num: usize) {
-        GLOBAL_SCHEDULER.init_by(Arc::new(SpinNoIrq::new(Scheduler::new())));
+        GLOBAL_SCHEDULER.init_by(Arc::new(SpinNoIrqOnly::new(Scheduler::new())));
         GLOBAL_SCHEDULER.lock().init();
 
         #[cfg(feature = "smp")]
@@ -137,13 +137,13 @@ impl Processor {
             // percpu::init(cpu_num);
             // percpu::set_local_thread_pointer(cpu_id);
             PROCESSOR.with_current(|processor| {
-                processor.init_by(SpinNoIrq::new(Processor::new(cpu_id)));
+                processor.init_by(SpinNoIrqOnly::new(Processor::new(cpu_id)));
             });
             MAIN_PROCESSOR_INIT_FINISHED.store(true, Ordering::Release);
         }
 
         #[cfg(not(feature = "smp"))]
-        PROCESSOR.init_by(SpinNoIrq::new(Processor::new(cpu_id)));
+        PROCESSOR.init_by(SpinNoIrqOnly::new(Processor::new(cpu_id)));
     }
 
     #[cfg(feature = "smp")]
@@ -152,8 +152,20 @@ impl Processor {
         // arceos启动过程已经初始化了percpu库
         // percpu::set_local_thread_pointer(cpu_id);
         PROCESSOR.with_current(|processor| {
-            processor.init_by(SpinNoIrq::new(Processor::new(cpu_id)));
+            processor.init_by(SpinNoIrqOnly::new(Processor::new(cpu_id)));
         });
+    }
+
+    pub(crate) fn current_is_init() -> bool {
+        #[cfg(feature = "smp")]
+        let is_init = PROCESSOR.with_current(|processor| {
+            processor.is_init()
+        });
+
+        #[cfg(not(feature = "smp"))]
+        let is_init = PROCESSOR.is_init();
+
+        is_init
     }
 
     /// 获取当前CPU
@@ -224,6 +236,16 @@ impl Processor {
             self.idle_task.clone()
         }
     }
+
+    /// 执行调度器在每个tick（时钟中断）时执行的工作，并返回是否需要抢占
+    pub(crate) fn scheduler_tick(&self) -> bool {
+        let current = self.current_task().get_current_ptr();
+        self.with_local_scheduler(|scheduler| {
+            scheduler.task_tick(&current);
+            scheduler.scheduler_tick(&current)
+        }) || 
+        self.with_global_scheduler(|scheduler| scheduler.scheduler_tick(&current))
+    }
 }
 
 /// private方法
@@ -231,7 +253,7 @@ impl Processor {
     // 需要在GLOBAL_SCHEDULER初始化完成后调用
     fn new(id: usize) -> Self {
         let idle_task = TaskInner::new_idle(); // idle_task不需放入调度器，调度器如果取不到任务就会返回idle_task
-        let original_task = TaskInner::new_original();
+        let original_task = TaskInner::new_original(); // 运行任务前，处理器的上下文也视为一个任务，即为original_task
         let processor = Self {
             id,
             local_scheduler: UnsafeCell::new(Scheduler::new()),

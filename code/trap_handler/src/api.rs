@@ -1,13 +1,15 @@
 // -----初始化-----
 
 use alloc::boxed::Box;
-use riscv::register::{scause::Trap, sie};
+use riscv::register::{scause::Trap, sie, sstatus};
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::{entry::{enable_irqs, set_stvec}, handler::{init_handler, EXCEPTION_HANDLER, EXTINTR_HANDLER, INTERRUPT_HANDLER, SYSCALL_HANDLER}};
+use crate::{entry::set_stvec, handler::{init_handler, EXCEPTION_HANDLER, EXTINTR_HANDLER, INTERRUPT_HANDLER, SYSCALL_HANDLER}};
 
 #[cfg(feature = "timer")]
-use crate::timer::{init_timer_on_main_processor, init_timer_on_secondary_processor};
+use crate::timer::init_timer_on_main_processor;
+#[cfg(all(feature = "timer", feature = "smp"))]
+use crate::timer::init_timer_on_secondary_processor;
 #[cfg(feature = "timer")]
 pub use crate::timer::CurrentTimebaseFrequency;
 
@@ -18,9 +20,14 @@ static MAIN_PROCESSOR_INIT_FINISHED: AtomicBool = AtomicBool::new(false);
 pub fn init_main_processor() {
     init_handler();
     set_stvec();
+    unsafe {
+        sie::set_sext();
+        sie::set_ssoft();
+        sie::set_stimer();
+    }
     #[cfg(feature = "timer")]
     init_timer_on_main_processor();
-    enable_irqs();
+    // enable_irqs();
 
     #[cfg(feature = "smp")]
     MAIN_PROCESSOR_INIT_FINISHED.store(true, Ordering::Release);
@@ -34,9 +41,27 @@ pub fn init_secondary_processor() {
     while !MAIN_PROCESSOR_INIT_FINISHED.load(Ordering::Acquire) { } //等待主CPU初始化完成
 
     set_stvec();
+    unsafe {
+        sie::set_sext();
+        sie::set_ssoft();
+        sie::set_stimer();
+    }
     #[cfg(feature = "timer")]
     init_timer_on_secondary_processor();
-    enable_irqs();
+    // enable_irqs();
+}
+
+#[no_mangle]
+pub fn enable_irqs() {
+    unsafe {
+        sstatus::set_sie();
+    }
+}
+
+pub fn disable_irqs() {
+    unsafe {
+        sstatus::clear_sie();
+    }
 }
 
 // -----注册处理程序-----
@@ -50,12 +75,8 @@ pub fn init_secondary_processor() {
 pub fn register_trap_handler<F>(scause: Trap, handler: F)
 where F: Fn(usize) + Send + Sync + 'static {
     match scause {
-        Trap::Interrupt(interrupt) => INTERRUPT_HANDLER.insert(interrupt.try_into().unwrap(), Box::new(move |stval, _context| {
-            handler(stval)
-        })),
-        Trap::Exception(exception) => EXCEPTION_HANDLER.insert(exception.try_into().unwrap(), Box::new(move |stval, _context| {
-            handler(stval)
-        })),
+        Trap::Interrupt(interrupt) => INTERRUPT_HANDLER.insert(interrupt.try_into().unwrap(), Box::new(move |stval, _context| handler(stval))),
+        Trap::Exception(exception) => EXCEPTION_HANDLER.insert(exception.try_into().unwrap(), Box::new(move |stval, _context| handler(stval))),
     }
 }
 

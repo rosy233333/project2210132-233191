@@ -1,10 +1,18 @@
 use core::borrow::Borrow;
 
+use alloc::boxed::Box;
 use axlog::debug;
 use lazy_init::LazyInit;
 use riscv::register::{scause::{Interrupt, Trap}, time};
+use task_management::{scheduler_tick_current, TaskContext};
+
+#[cfg(feature = "preempt")]
+use task_management::current_can_preempt;
 
 use crate::{handler::INTERRUPT_HANDLER, register_trap_handler};
+
+#[cfg(feature = "preempt")]
+use task_management::preempt_current;
 
 #[crate_interface::def_interface]
 pub trait CurrentTimebaseFrequency {
@@ -21,7 +29,7 @@ static TIMEBASE_FREQUENCY: LazyInit<usize> = LazyInit::new();
 static TIMEBASE_FREQUENCY: LazyInit<usize> = LazyInit::new();
 
 /// 时钟中断触发的频率（Hz）
-static TIMER_FREQUENCY: usize = 1000_000;
+static TIMER_FREQUENCY: usize = 1_000;
 
 // 在init_handler()之后，enable_irqs()之前调用
 pub(crate) fn init_timer_on_main_processor() {
@@ -30,9 +38,10 @@ pub(crate) fn init_timer_on_main_processor() {
     TIMEBASE_FREQUENCY.with_current(|tf| tf.init_by(crate_interface::call_interface!(CurrentTimebaseFrequency::current_timebase_frequency())));
 
     #[cfg(not(feature = "smp"))]
-    TIMEBASE_FREQUENCY.init_by(crate_interface::call_interface!(current_timebase_frequency()));
+    TIMEBASE_FREQUENCY.init_by(crate_interface::call_interface!(CurrentTimebaseFrequency::current_timebase_frequency()));
 
-    register_trap_handler(Trap::Interrupt(Interrupt::SupervisorTimer), timer_interrupt_handler);
+    // register_trap_handler(Trap::Interrupt(Interrupt::SupervisorTimer), timer_interrupt_handler);
+    INTERRUPT_HANDLER.insert(Interrupt::SupervisorTimer.try_into().unwrap(), Box::new(timer_interrupt_handler));
     sbi_rt::set_timer(0);
 }
 
@@ -42,7 +51,7 @@ pub(crate) fn init_timer_on_secondary_processor() {
     sbi_rt::set_timer(0);
 }
 
-fn timer_interrupt_handler(_stval: usize) {
+fn timer_interrupt_handler(_stval: usize, context: &mut TaskContext) {
     #[cfg(feature = "smp")]
     let timebase_frequency: usize = TIMEBASE_FREQUENCY.with_current(|tf| **tf);
     #[cfg(not(feature = "smp"))]
@@ -55,4 +64,9 @@ fn timer_interrupt_handler(_stval: usize) {
     // 时钟中断处理函数的实际功能
     // #[cfg(feature = "log")]
     // debug!("Receive timer interrupt!");
+    let need_resched = scheduler_tick_current();
+    #[cfg(feature = "preempt")]
+    if need_resched && current_can_preempt() {
+        preempt_current(context)
+    }
 }

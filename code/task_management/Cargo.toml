@@ -12,6 +12,7 @@ lazy_init = { git = "https://github.com/Starry-OS/lazy_init.git" }
 # kernel_guard = { git = "https://github.com/Starry-OS/kernel_guard.git" }
 kernel_guard = { path = "../kernel_guard" }
 axlog = { git = "https://github.com/Starry-OS/axlog.git" }
+crate_interface = { version = "0.1.3", optional = true }
 
 
 # [target.'cfg(any(target_arch = "riscv32", target_arch = "riscv64"))'.dependencies]
@@ -21,6 +22,7 @@ riscv = "0.11"
 # 对多处理器的支持
 smp = [ "spinlock/smp", "percpu" ]
 # 若系统支持抢占，则需要启用该feature，同时也需按照 [kernel_guard依赖项](https://github.com/Starry-OS/kernel_guard) 的要求实现 `KernelGuardIf` 接口
-preempt = [ "percpu/preempt", "kernel_guard/preempt" ] # 未完成
-
+preempt = [ "spinlock/preempt", "percpu?/preempt", "kernel_guard/preempt", "crate_interface" ] # 未完成
+irq = []
+fp_context = []
 default = ["smp", "preempt"]

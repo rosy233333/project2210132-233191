@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
-use axlog::{debug, error, info};
+use axlog::{debug, error, info, warn};
+use riscv::register::sstatus;
 use spinlock::SpinNoIrqOnlyGuard;
 use core::{arch::asm, mem::ManuallyDrop, ops::Deref, task::Poll};
 use crate::{processor::{self, Processor}, task::TaskState};
@@ -10,8 +11,15 @@ use super::{reg_context::{load_next_ctx, save_prev_ctx}, waker::waker_from_task,
 // #[cfg(feature = "preempt")]
 /// This is only used when the preempt feature is enabled.
 pub(crate) fn preempt_switch_entry(taskctx: &mut TaskContext) {
+    // 在进行切换时关中断
+    #[cfg(feature = "irq")]
+    unsafe {
+        sstatus::clear_sie();
+    }
+
     let prev_task = Processor::with_current(|processor| {
-        processor.acquire_switch_guard();
+        // processor.acquire_switch_guard();
+        // warn!("interupt status when switch: {}", processor.get_sstatus_in_switch_guard());
         processor.current_task().get_current_ptr()
     });
 
@@ -25,10 +33,16 @@ pub(crate) fn preempt_switch_entry(taskctx: &mut TaskContext) {
 
 /// This function is the entrance of activie switching.
 pub(crate) fn switch_entry(is_thread: bool) {
-    // 因为processor.acquire_switch_guard()会修改sstatus以禁止中断，因此将修改时保存的中断状态传入save_prev_ctx()，保存在TaskContext中。
-    let (prev_task, s_irq_flag) = Processor::with_current(|processor| {
-        processor.acquire_switch_guard();
-        (processor.current_task().get_current_ptr(), processor.get_sstatus_in_switch_guard())
+    // 在进行切换时关中断
+    #[cfg(feature = "irq")]
+    unsafe {
+        sstatus::clear_sie();
+    }
+
+    let prev_task = Processor::with_current(|processor| {
+        // processor.acquire_switch_guard();
+        // warn!("interupt status when switch: {}", processor.get_sstatus_in_switch_guard());
+        processor.current_task().get_current_ptr()
     });
 
     // debug
@@ -37,7 +51,7 @@ pub(crate) fn switch_entry(is_thread: bool) {
 
     if is_thread {
         // // debug
-        // error!("task {id} save context");
+        debug!("task {id} save context");
         unsafe { save_prev_ctx(&mut *prev_task.get_ctx_ref()); } // 该函数会调用schedule_with_sp_change()
     }
     else {
@@ -168,6 +182,7 @@ fn exchange_current(mut next_task: Arc<Task>) {
 }
 
 /// Run next task
+#[no_mangle]
 fn run_next() {
     // SAFETY: INIT when switch_to
     // First into task entry, manually perform the subsequent work of switch_to
@@ -196,8 +211,13 @@ fn run_next() {
             if old_stack.is_some() {
                 unsafe { processor.get_stack_pool_mut().recycle_stack(old_stack.unwrap()); }
             }
-            processor.release_switch_guard();
         });
+
+        // 在准备返回任务时开中断
+        #[cfg(feature = "irq")]
+        unsafe {
+            sstatus::set_sie();
+        }
         unsafe {
             // // debug
             // error!("task {id} load context:");
@@ -209,13 +229,16 @@ fn run_next() {
         let mut cx = core::task::Context::from_waker(&waker);
         let future = unsafe { &mut *next_task.get_future() };
 
-        Processor::with_current(|processor| {
-            processor.release_switch_guard();
-        });
+        // 在准备返回任务时开中断
+        #[cfg(feature = "irq")]
+        unsafe {
+            sstatus::set_sie();
+        }
         assert!(future.as_mut().poll(&mut cx).is_pending());
-        // 此处，任务执行后回到任务模块，因此需要再次获得switch_guard。
-        Processor::with_current(|processor| {
-            processor.acquire_switch_guard();
-        });
+        // 此处，任务执行后回到任务模块，因此需要再次关中断。
+        #[cfg(feature = "irq")]
+        unsafe {
+            sstatus::clear_sie();
+        }
     }
 }

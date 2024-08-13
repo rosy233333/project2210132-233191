@@ -1,7 +1,7 @@
-use core::{future::{poll_fn, Future, Pending}, mem::ManuallyDrop, pin::Pin, ptr::NonNull, sync::atomic::{AtomicI32, AtomicU64, Ordering}, task::Poll};
+use core::{future::{poll_fn, Future, Pending}, mem::ManuallyDrop, pin::Pin, ptr::NonNull, sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering}, task::Poll};
 use alloc::{boxed::Box, sync::Arc};
 use axlog::debug;
-use spinlock::{SpinNoIrq, SpinNoIrqGuard};
+use spinlock::{SpinNoIrq, SpinNoIrqGuard, SpinNoIrqOnly, SpinNoIrqOnlyGuard};
 use crossbeam::atomic::AtomicCell;
 use task_queues::scheduler::AxTask;
 
@@ -51,7 +51,7 @@ pub struct TaskInner {
     // preempt_disable_count: AtomicUsize,
 
     /// Task state
-    state: SpinNoIrq<TaskState>,
+    state: SpinNoIrqOnly<TaskState>,
 
     /// 返回值
     exit_code: AtomicI32,
@@ -60,6 +60,10 @@ pub struct TaskInner {
     // /// CPU亲和性
     // /// 用位图存储
     // cpu_set: AtomicU64,
+
+    /// 禁止抢占计数
+    #[cfg(feature = "preempt")]
+    preempt_disable_count: AtomicUsize,
 
     /// ---上下文相关---
     /// The future of the async task.
@@ -152,13 +156,13 @@ impl TaskInner {
 
     #[inline]
     /// lock the task state and ctx_ptr access
-    pub(crate) fn state_lock_manual(&self) -> ManuallyDrop<SpinNoIrqGuard<TaskState>> {
+    pub(crate) fn state_lock_manual(&self) -> ManuallyDrop<SpinNoIrqOnlyGuard<TaskState>> {
         ManuallyDrop::new(self.state.lock())
     }
 
     #[inline]
     /// lock the task state and ctx_ptr access
-    pub(crate) fn state_lock(&self) -> SpinNoIrqGuard<TaskState> {
+    pub(crate) fn state_lock(&self) -> SpinNoIrqOnlyGuard<TaskState> {
         self.state.lock()
     }
 
@@ -236,6 +240,28 @@ impl TaskInner {
     #[inline]
     pub(crate) fn get_future(&self) -> *mut Pin<Box<dyn Future<Output = ()> + Send>> {
         self.future.as_ptr()
+    }
+
+    #[cfg(feature = "preempt")]
+    #[inline]
+    pub(crate) fn increase_preempt_disable_count(&self) {
+        self.preempt_disable_count.fetch_add(1, Ordering::Release);
+    }
+
+    #[cfg(feature = "preempt")]
+    #[inline]
+    pub(crate) fn decrease_preempt_disable_count(&self) {
+        let old_value = self.preempt_disable_count.fetch_sub(1, Ordering::AcqRel);
+        if old_value == 0 {
+            self.preempt_disable_count.fetch_add(1, Ordering::Release);
+            panic!("Try to enable preempt when it is already enabled!");
+        }
+    }
+
+    #[cfg(feature = "preempt")]
+    #[inline]
+    pub(crate) fn get_preempt_disable_count(&self) -> usize {
+        self.preempt_disable_count.load(Ordering::Acquire)
     }
 }
 
@@ -318,8 +344,10 @@ impl TaskInner {
             is_idle,
             is_init,
             is_original,
-            state: SpinNoIrq::new(TaskState::Runable),
+            state: SpinNoIrqOnly::new(TaskState::Runable),
             exit_code: AtomicI32::new(0),
+            #[cfg(feature = "preempt")]
+            preempt_disable_count: AtomicUsize::new(0),
             future: AtomicCell::new(Box::pin(func)),
             ctx_ref: AtomicCell::new(NonNull::dangling()),
             owned_stack: AtomicCell::new(None),

@@ -3,7 +3,7 @@ use core::{cell::UnsafeCell, mem::ManuallyDrop};
 use alloc::{boxed::Box, collections::btree_map::BTreeMap};
 use lazy_init::LazyInit;
 use riscv::register::{scause::{self, Exception, Interrupt, Trap}, stval};
-use spinlock::SpinNoIrq;
+use spinlock::{SpinNoIrq, SpinNoIrqOnly};
 use task_management::TaskContext;
 
 #[cfg(feature = "log")]
@@ -12,7 +12,7 @@ use axlog::debug;
 pub(crate) struct HandlerMap<T: Sync> {
     map: UnsafeCell<BTreeMap<usize, T>>,
     default: T,
-    write_lock: SpinNoIrq<usize>,
+    write_lock: SpinNoIrqOnly<usize>,
 }
 
 impl<T: Sync> HandlerMap<T> {
@@ -20,7 +20,7 @@ impl<T: Sync> HandlerMap<T> {
         Self {
             map: UnsafeCell::new(BTreeMap::new()),
             default,
-            write_lock: SpinNoIrq::new(0),
+            write_lock: SpinNoIrqOnly::new(0),
         }
     }
 
@@ -102,7 +102,4 @@ pub(crate) fn trap_handler(trap_context: &mut TaskContext) {
             EXCEPTION_HANDLER.get_ref(cause)(stval, trap_context);
         }
     }
-
-    #[cfg(feature = "preempt")]
-    unimplemented!()
 }

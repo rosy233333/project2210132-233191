@@ -240,5 +240,20 @@ fn run_next() {
         unsafe {
             sstatus::clear_sie();
         }
+
+        let mut next_state_lock = next_task.state_lock_manual();
+        match **next_state_lock {
+            TaskState::Yielding => {
+                **next_state_lock = TaskState::Runable;
+            },
+            TaskState::Runable => {
+                **next_state_lock = TaskState::Blocking;
+            },
+            TaskState::Blocking | TaskState::Exited => (),
+            _ => {
+                panic!("unexpect state {:?} when coroutine returns.", **next_state_lock);
+            }
+        }
+        ManuallyDrop::into_inner(next_state_lock);
     }
 }

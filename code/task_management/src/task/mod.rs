@@ -12,7 +12,7 @@ mod waker;
 pub use reg_context::TaskContext;
 pub(crate) use switch::{preempt_switch_entry, switch_entry};
 
-use crate::{exit_current, exit_current_async, processor::Processor, stack::TaskStack};
+use crate::{exit_current, exit_current_async, processor::Processor, stack::TaskStack, yield_helper};
 
 pub type Task = AxTask<TaskInner>;
 
@@ -92,6 +92,10 @@ pub(crate) enum TaskState {
     Blocked = 3,
     /// 保存返回值 -> 设置Exited状态 -> 停止执行
     Exited = 4,
+    /// 协程专用的状态
+    /// 设置Yielding状态 -> poll返回Pending -> 协程视为让出，放回调度器
+    /// 不设置Yielding状态 -> poll返回Pending -> 协程视为阻塞，不放回调度器
+    Yielding = 5,
 }
 
 /// A unique identifier for a thread.
@@ -202,6 +206,12 @@ impl TaskInner {
         matches!(self.state(), TaskState::Blocked)
     }
 
+    /// Whether the task is yielding
+    #[inline]
+    pub(crate) fn is_yielding(&self) -> bool {
+        matches!(self.state(), TaskState::Yielding)
+    }
+
     #[inline]
     pub(crate) fn set_exit_code(&self, exit_code: i32) {
         self.exit_code.store(exit_code, Ordering::Release)
@@ -278,10 +288,16 @@ impl TaskInner {
     }
 
     pub(crate) fn new_idle() -> Arc<Task> {
-        Self::new_async_raw(poll_fn(|_| -> Poll<i32> {
-            debug!("run idle task");
-            Poll::Pending
-        }), true, false, false)
+        // Self::new_async_raw(poll_fn(|_| -> Poll<i32> {
+        //     debug!("run idle task");
+        //     Poll::Pending
+        // }), true, false, false)
+        Self::new_async_raw(async {
+            loop{
+                debug!("run idle task");
+                yield_helper(true).await;
+            }
+        }, true, false, false)
     }
 
     pub(crate) fn new_init<F>(func: F) -> Arc<Task>

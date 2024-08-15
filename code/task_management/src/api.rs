@@ -252,7 +252,7 @@ pub async fn yield_current_to_local_async() {
         let current = processor.current_task().get_current_ptr();
         assert!(current.is_runable());
     });
-    yield_helper().await;
+    yield_helper(true).await;
 }
 
 // 暂时不考虑，因为可能出现同步问题：放入调度器后，还未保存上下文，就被其它CPU核心取出执行。
@@ -268,7 +268,19 @@ pub async fn yield_current_to_local_async() {
 
 /// 用于使协程让出一次，切换到其它任务、
 /// 功能相当于线程的switch_entry()
-async fn yield_helper() {
+/// 参数is_yield为true说明让出（放回调度器），为false说明阻塞（不放回调度器）
+pub(crate) async fn yield_helper(is_yield: bool) {
+    if is_yield {
+        Processor::with_current(|processor| {
+            let current = processor.current_task().get_current_ptr();
+            // current_state作用域
+            {
+                let mut current_state = current.state_lock();
+                assert!(matches!(*current_state, TaskState::Runable));
+                *current_state = TaskState::Yielding; // 状态为Exited的任务一定已经保存好了返回值
+            }
+        });
+    }
     let mut flag = false;
     poll_fn(|_cx| {
         flag = !flag;
@@ -318,7 +330,7 @@ pub async fn exit_current_async(exit_code: i32) {
             *current_state = TaskState::Exited; // 状态为Exited的任务一定已经保存好了返回值
         }
     });
-    yield_helper().await;
+    yield_helper(false).await;
 }
 
 // 目前先不考虑该接口
@@ -448,7 +460,7 @@ impl BlockQueue {
             }
             self.0.add(current);
         });
-        yield_helper().await;
+        yield_helper(false).await;
     }
 
     /// 当阻塞队列被锁保护时，请使用该函数进行阻塞
@@ -484,7 +496,7 @@ impl BlockQueue {
             }
             (*lock_fn(&locked_self)).0.add(current);
         });
-        yield_helper().await;
+        yield_helper(false).await;
     }
 
     /// 从队列中唤醒任务，放入当前CPU核心的调度器中

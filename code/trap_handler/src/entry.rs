@@ -1,7 +1,7 @@
 use core::{arch::global_asm, mem::size_of};
 
 use riscv::register::{sie, sstatus, stvec};
-use task_management::TaskContext;
+pub use task_management::TaskContext;
 use crate::handler::trap_handler;
 
 #[cfg(target_arch = "riscv32")]

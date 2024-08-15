@@ -6,6 +6,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{entry::set_stvec, handler::{init_handler, EXCEPTION_HANDLER, EXTINTR_HANDLER, INTERRUPT_HANDLER, SYSCALL_HANDLER}};
 
+pub use crate::entry::TaskContext;
+
 #[cfg(feature = "timer")]
 use crate::timer::init_timer_on_main_processor;
 #[cfg(all(feature = "timer", feature = "smp"))]
@@ -73,10 +75,10 @@ pub fn disable_irqs() {
 ///     Exception(UserEnvCall) --> 获取系统调用号和参数，进入对应的syscall_handler
 ///     其它 --> 进入对应的trap_handler
 pub fn register_trap_handler<F>(scause: Trap, handler: F)
-where F: Fn(usize) + Send + Sync + 'static {
+where F: Fn(usize, &mut TaskContext) + Send + Sync + 'static {
     match scause {
-        Trap::Interrupt(interrupt) => INTERRUPT_HANDLER.insert(interrupt.try_into().unwrap(), Box::new(move |stval, _context| handler(stval))),
-        Trap::Exception(exception) => EXCEPTION_HANDLER.insert(exception.try_into().unwrap(), Box::new(move |stval, _context| handler(stval))),
+        Trap::Interrupt(interrupt) => INTERRUPT_HANDLER.insert(interrupt.try_into().unwrap(), Box::new(handler)),
+        Trap::Exception(exception) => EXCEPTION_HANDLER.insert(exception.try_into().unwrap(), Box::new(handler)),
     }
 }
 

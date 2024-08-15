@@ -90,7 +90,7 @@ pub(crate) fn trap_handler(trap_context: &mut TaskContext) {
     let stval = stval::read();
 
     #[cfg(feature = "log")]
-    debug!("New trap, scause: {:#016x}, stval: {:#016x}, sepc: {:#016x}", scause.bits(), stval, trap_context.sepc);
+    debug!("New trap, scause: {:#018x}, stval: {:#018x}, sepc: {:#018x}", scause.bits(), stval, trap_context.sepc);
 
     match scause.cause() {
         Trap::Interrupt(interrupt) => {

@@ -13,3 +13,6 @@
 [submodule "Starry"]
 	path = Starry
 	url = https://github.com/rosy233333/Starry.git
+[submodule "minimal_runtime"]
+	path = minimal_runtime
+	url = https://github.com/rosy233333/minimal_runtime.git

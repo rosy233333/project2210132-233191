@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use axlog::{debug, error, info, warn};
 use riscv::register::sstatus;
 use spinlock::SpinNoIrqOnlyGuard;
-use core::{arch::asm, mem::ManuallyDrop, ops::Deref, task::Poll};
+use core::{arch::naked_asm, mem::ManuallyDrop, ops::Deref, task::Poll};
 use crate::{processor::{self, Processor}, task::TaskState};
 
 // use crate::{current_processor, processor::PrevCtxSave, stack_pool::TaskStack, AxTaskRef, CurrentTask, TaskState};
@@ -64,7 +64,7 @@ pub(crate) fn switch_entry(is_thread: bool) {
 #[no_mangle]
 #[naked]
 pub(super) unsafe extern "C" fn schedule_with_sp_change() {
-    asm!(
+    naked_asm!(
         "
         call    {before_change_stack}
         ",
@@ -78,7 +78,6 @@ pub(super) unsafe extern "C" fn schedule_with_sp_change() {
         ",
         before_change_stack = sym before_change_stack,
         schedule_without_sp_change = sym schedule_without_sp_change,
-        options(noreturn),
     );
 }
 

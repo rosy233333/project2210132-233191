@@ -6,20 +6,24 @@ use alloc::sync::Arc;
 
 use core::task::{RawWaker, RawWakerVTable, Waker};
 
-const VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake, drop);
+const VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
 
 unsafe fn clone(p: *const ()) -> RawWaker {
     RawWaker::new(p, &VTABLE)
 }
 
-/// nop
 // 疑问：这里的wake函数是否会释放掉持有的任务的Arc？如果是的话，它是否不能直接作为wake_by_ref函数？
 unsafe fn wake(p: *const ()) { 
     Arc::from_raw(p as *const Task).wakeup();
 }
 
+unsafe fn wake_by_ref(p: *const ()) { 
+    let task = Arc::from_raw(p as *const Task);
+    task.clone().wakeup();
+    Arc::into_raw(task);
+}
+
 unsafe fn drop(p: *const ()) {
-    // nop
     Arc::from_raw(p as *const Task);
 }
 

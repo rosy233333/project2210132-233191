@@ -370,3 +370,10 @@ impl TaskInner {
         }))
     }
 }
+
+/// pub方法
+impl TaskInner {
+    pub fn set_yielding_state(&self) {
+        self.set_state(TaskState::Yielding);
+    }
+}

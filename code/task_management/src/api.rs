@@ -254,6 +254,13 @@ pub async fn yield_current_to_local_async() {
     });
     yield_helper(true).await;
 }
+pub fn set_current_state_yield() {
+    Processor::with_current(|processor| {
+        let current = processor.current_task().get_current_ptr();
+        assert!(current.is_runable());
+        current.set_yielding_state();
+    });
+}
 
 // 暂时不考虑，因为可能出现同步问题：放入调度器后，还未保存上下文，就被其它CPU核心取出执行。
 // 原因：目前运行和就绪状态都用TaskState::Runable表示。

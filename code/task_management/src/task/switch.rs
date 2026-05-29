@@ -1,12 +1,19 @@
+use crate::{
+    processor::{self, Processor},
+    task::TaskState,
+};
 use alloc::sync::Arc;
 use axlog::{debug, error, info, warn};
+use core::{arch::naked_asm, mem::ManuallyDrop, ops::Deref, task::Poll};
 use riscv::register::sstatus;
 use spinlock::SpinNoIrqOnlyGuard;
-use core::{arch::naked_asm, mem::ManuallyDrop, ops::Deref, task::Poll};
-use crate::{processor::{self, Processor}, task::TaskState};
 
 // use crate::{current_processor, processor::PrevCtxSave, stack_pool::TaskStack, AxTaskRef, CurrentTask, TaskState};
-use super::{reg_context::{load_next_ctx, save_prev_ctx}, waker::waker_from_task, Task, TaskContext};
+use super::{
+    reg_context::{load_next_ctx, save_prev_ctx},
+    waker::waker_from_task,
+    Task, TaskContext,
+};
 
 // #[cfg(feature = "preempt")]
 /// This is only used when the preempt feature is enabled.
@@ -28,7 +35,9 @@ pub(crate) fn preempt_switch_entry(taskctx: &mut TaskContext) {
     debug!("into preempt_switch_entry() with prev task {id}");
 
     prev_task.set_ctx_ref(taskctx as _);
-    unsafe { schedule_with_sp_change(); }
+    unsafe {
+        schedule_with_sp_change();
+    }
 }
 
 /// This function is the entrance of activie switching.
@@ -52,9 +61,10 @@ pub(crate) fn switch_entry(is_thread: bool) {
     if is_thread {
         // // debug
         debug!("task {id} save context");
-        unsafe { save_prev_ctx(&mut *prev_task.get_ctx_ref()); } // 该函数会调用schedule_with_sp_change()
-    }
-    else {
+        unsafe {
+            save_prev_ctx(&mut *prev_task.get_ctx_ref());
+        } // 该函数会调用schedule_with_sp_change()
+    } else {
         schedule_without_sp_change();
     }
 }
@@ -62,7 +72,7 @@ pub(crate) fn switch_entry(is_thread: bool) {
 // 之前在rust代码中插入改变sp的内联汇编，发现在Release模式下会出错（Debug模式下不会）。
 // 考虑到可能是因为rust代码编译出了在换栈后访问原栈上的数据的汇编指令，因此将整个函数改为汇编实现。
 #[no_mangle]
-#[naked]
+#[unsafe(naked)]
 pub(super) unsafe extern "C" fn schedule_with_sp_change() {
     naked_asm!(
         "
@@ -86,7 +96,9 @@ fn before_change_stack() -> usize {
     Processor::with_current(|processor| {
         let new_stack = processor.get_stack_pool_mut().fetch();
         let new_stack_top = new_stack.top();
-        let old_stack = processor.get_stack_pool_mut().swap_curr_stack(Some(new_stack));
+        let old_stack = processor
+            .get_stack_pool_mut()
+            .swap_curr_stack(Some(new_stack));
         let prev_task = processor.current_task().get_current_ptr();
 
         // debug
@@ -105,9 +117,7 @@ fn before_change_stack() -> usize {
 /// The prev task is a coroutine and the current stack will be reused.
 #[no_mangle]
 fn schedule_without_sp_change() {
-    let next_task = Processor::with_current(|processor| {
-        processor.pick_next_task()
-    });
+    let next_task = Processor::with_current(|processor| processor.pick_next_task());
 
     // debug
     let id = next_task.id();
@@ -117,10 +127,9 @@ fn schedule_without_sp_change() {
 }
 
 /// Change the current status
-/// 
+///
 /// Include the Processor and current task
 fn exchange_current(mut next_task: Arc<Task>) {
-
     // debug
     let id = next_task.id();
     debug!("into exchange_current() with next task {id}");
@@ -172,7 +181,6 @@ fn exchange_current(mut next_task: Arc<Task>) {
         processor.current_task().replace_current(next_task);
     });
 
-
     // #[cfg(feature = "preempt")]
     // // reset preempt pending
     // next_task.set_preempt_pending(false);
@@ -187,11 +195,9 @@ fn run_next() {
     // First into task entry, manually perform the subsequent work of switch_to
 
     // 疑问：Processsor的PrevCtxSave和switch_post似乎没有作用？
-    // current_processor().switch_post(); 
+    // current_processor().switch_post();
 
-    let next_task = Processor::with_current(|processor| {
-        processor.current_task().get_current_ptr()
-    });
+    let next_task = Processor::with_current(|processor| processor.current_task().get_current_ptr());
 
     // debug
     let id = next_task.id();
@@ -199,7 +205,7 @@ fn run_next() {
 
     if next_task.is_thread() {
         let task_ctx_ref = next_task.get_ctx_ref();
-        // Dangerous: the current stack will be recycled. 
+        // Dangerous: the current stack will be recycled.
         // But it is used until executing the `load_next_ctx` function.
         Processor::with_current(|processor| {
             let new_stack = next_task.swap_owned_stack(None);
@@ -208,7 +214,11 @@ fn run_next() {
             // original_task持有的栈不被processor数据结构管理
             assert!(old_stack.is_some() || next_task.is_original());
             if old_stack.is_some() {
-                unsafe { processor.get_stack_pool_mut().recycle_stack(old_stack.unwrap()); }
+                unsafe {
+                    processor
+                        .get_stack_pool_mut()
+                        .recycle_stack(old_stack.unwrap());
+                }
             }
         });
 
@@ -244,13 +254,16 @@ fn run_next() {
         match **next_state_lock {
             TaskState::Yielding => {
                 **next_state_lock = TaskState::Runable;
-            },
+            }
             TaskState::Runable => {
                 **next_state_lock = TaskState::Blocking;
-            },
+            }
             TaskState::Blocking | TaskState::Exited => (),
             _ => {
-                panic!("unexpect state {:?} when coroutine returns.", **next_state_lock);
+                panic!(
+                    "unexpect state {:?} when coroutine returns.",
+                    **next_state_lock
+                );
             }
         }
         ManuallyDrop::into_inner(next_state_lock);

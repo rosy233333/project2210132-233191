@@ -514,32 +514,457 @@ global_asm!(
 #[no_mangle]
 // Save the previous context to the stack, and call schedule_with_sp_change().
 pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskContext>) {
-    core::arch::naked_asm!(
-        // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S
-        // 在栈上申请空间并移动sp（sp的原值借助sscratch间接存储在TaskContext中）
-        "
-        mv      t2, sp
-        addi    sp, sp, -{taskctx_size}
-        ",
-        "SAVE_THREAD_CTX",
-        // a0 -> ctx_ref
-        // sp -> *mut TaskContext
-        "STR    sp, a0, 0",
-        "call   {schedule_with_sp_change}",
-        taskctx_size = const TASKCONTEXT_SIZE,
-        schedule_with_sp_change = sym schedule_with_sp_change,
-    )
+    #[cfg(target_arch = "riscv32")]
+    {
+        #[cfg(feature = "fp_context")]
+        {
+            core::arch::naked_asm!(
+                // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S
+                // 在栈上申请空间并移动sp（sp的原值借助sscratch间接存储在TaskContext中）
+                ".include \"macros_rv32.S\"",
+                "
+                    mv      t2, sp
+                    addi    sp, sp, -{taskctx_size}
+                ",
+                "
+                    # SAVE_THREAD_CTX
+                    STR     ra, sp, 0
+                    STR     s0, sp, 7
+                    STR     s1, sp, 8
+                    STR     s2, sp, 17
+                    STR     s3, sp, 18
+                    STR     s4, sp, 19
+                    STR     s5, sp, 20
+                    STR     s6, sp, 21
+                    STR     s7, sp, 22
+                    STR     s8, sp, 23
+                    STR     s9, sp, 24
+                    STR     s10, sp, 25
+                    STR     s11, sp, 26
+                    STR     t2, sp, 1
+
+                    li      t0, 0
+                    STR     t0, sp, 31
+                    STR     t0, sp, 32
+                    .short  0xa622
+                    .short  0xaa26
+                ",
+                // a0 -> ctx_ref
+                // sp -> *mut TaskContext
+                "STR    sp, a0, 0",
+                "call   {schedule_with_sp_change}",
+                taskctx_size = const TASKCONTEXT_SIZE,
+                schedule_with_sp_change = sym schedule_with_sp_change,
+            )
+        }
+        #[cfg(not(feature = "fp_context"))]
+        {
+            core::arch::naked_asm!(
+                // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S
+                // 在栈上申请空间并移动sp（sp的原值借助sscratch间接存储在TaskContext中）
+                ".include \"macros_rv32.S\"",
+                "
+                    mv      t2, sp
+                    addi    sp, sp, -{taskctx_size}
+                ",
+                "
+                    # SAVE_THREAD_CTX
+                    STR     ra, sp, 0
+                    STR     s0, sp, 7
+                    STR     s1, sp, 8
+                    STR     s2, sp, 17
+                    STR     s3, sp, 18
+                    STR     s4, sp, 19
+                    STR     s5, sp, 20
+                    STR     s6, sp, 21
+                    STR     s7, sp, 22
+                    STR     s8, sp, 23
+                    STR     s9, sp, 24
+                    STR     s10, sp, 25
+                    STR     s11, sp, 26
+                    STR     t2, sp, 1
+
+                    li      t0, 0
+                    STR     t0, sp, 31
+                    STR     t0, sp, 32
+                ",
+                // a0 -> ctx_ref
+                // sp -> *mut TaskContext
+                "STR    sp, a0, 0",
+                "call   {schedule_with_sp_change}",
+                taskctx_size = const TASKCONTEXT_SIZE,
+                schedule_with_sp_change = sym schedule_with_sp_change,
+            )
+        }
+    }
+    #[cfg(target_arch = "riscv64")]
+    {
+        #[cfg(feature = "fp_context")]
+        {
+            core::arch::naked_asm!(
+                // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S
+                // 在栈上申请空间并移动sp（sp的原值借助sscratch间接存储在TaskContext中）
+                ".include \"macros_rv64.S\"",
+                "
+                    mv      t2, sp
+                    addi    sp, sp, -{taskctx_size}
+                ",
+                "
+                    # SAVE_THREAD_CTX
+                    STR     ra, sp, 0
+                    STR     s0, sp, 7
+                    STR     s1, sp, 8
+                    STR     s2, sp, 17
+                    STR     s3, sp, 18
+                    STR     s4, sp, 19
+                    STR     s5, sp, 20
+                    STR     s6, sp, 21
+                    STR     s7, sp, 22
+                    STR     s8, sp, 23
+                    STR     s9, sp, 24
+                    STR     s10, sp, 25
+                    STR     s11, sp, 26
+                    STR     t2, sp, 1
+
+                    li      t0, 0
+                    STR     t0, sp, 31
+                    STR     t0, sp, 32
+                    .short  0xa622
+                    .short  0xaa26
+                ",
+                // a0 -> ctx_ref
+                // sp -> *mut TaskContext
+                "STR    sp, a0, 0",
+                "call   {schedule_with_sp_change}",
+                taskctx_size = const TASKCONTEXT_SIZE,
+                schedule_with_sp_change = sym schedule_with_sp_change,
+            )
+        }
+        #[cfg(not(feature = "fp_context"))]
+        {
+            core::arch::naked_asm!(
+                // 参考AsyncStarry的crates/axtrap/src/arch/riscv/trap.S
+                // 在栈上申请空间并移动sp（sp的原值借助sscratch间接存储在TaskContext中）
+                ".include \"macros_rv64.S\"",
+                "
+                    mv      t2, sp
+                    addi    sp, sp, -{taskctx_size}
+                ",
+                "
+                    # SAVE_THREAD_CTX
+                    STR     ra, sp, 0
+                    STR     s0, sp, 7
+                    STR     s1, sp, 8
+                    STR     s2, sp, 17
+                    STR     s3, sp, 18
+                    STR     s4, sp, 19
+                    STR     s5, sp, 20
+                    STR     s6, sp, 21
+                    STR     s7, sp, 22
+                    STR     s8, sp, 23
+                    STR     s9, sp, 24
+                    STR     s10, sp, 25
+                    STR     s11, sp, 26
+                    STR     t2, sp, 1
+
+                    li      t0, 0
+                    STR     t0, sp, 31
+                    STR     t0, sp, 32
+                ",
+                // a0 -> ctx_ref
+                // sp -> *mut TaskContext
+                "STR    sp, a0, 0",
+                "call   {schedule_with_sp_change}",
+                taskctx_size = const TASKCONTEXT_SIZE,
+                schedule_with_sp_change = sym schedule_with_sp_change,
+            )
+        }
+    }
 }
 
 #[unsafe(naked)]
 /// Load the next context from the stack.
 pub(crate) unsafe extern "C" fn load_next_ctx(next_ctx_ref: &mut NonNull<TaskContext>) {
-    core::arch::naked_asm!(
-        "
-        LDR     sp, a0, 0
-        li      a1, 8
-        STR     a1, a0, 0
-        ",
-        "LOAD_CTX_AND_RETURN",
-    )
+    #[cfg(target_arch = "riscv32")]
+    {
+        #[cfg(feature = "fp_context")]
+        {
+            core::arch::naked_asm!(
+                ".include \"macros_rv32.S\"",
+                "
+                    LDR     sp, a0, 0
+                    li      a1, 8
+                    STR     a1, a0, 0
+                ",
+                "
+                    # LOAD_CTX_AND_RETURN
+                    LDR     t0, sp, 31
+                    LDR     t1, sp, 32
+                    beqz    t0, 2f
+
+                    .short  0x2432
+                    .short  0x24d2
+                    LDR     ra, sp, 0
+                    LDR     t0, sp, 4
+                    LDR     t1, sp, 5
+                    LDR     t2, sp, 6
+                    LDR     s0, sp, 7
+                    LDR     s1, sp, 8
+                    LDR     a0, sp, 9
+                    LDR     a1, sp, 10
+                    LDR     a2, sp, 11
+                    LDR     a3, sp, 12
+                    LDR     a4, sp, 13
+                    LDR     a5, sp, 14
+                    LDR     a6, sp, 15
+                    LDR     a7, sp, 16
+                    LDR     s2, sp, 17
+                    LDR     s3, sp, 18
+                    LDR     s4, sp, 19
+                    LDR     s5, sp, 20
+                    LDR     s6, sp, 21
+                    LDR     s7, sp, 22
+                    LDR     s8, sp, 23
+                    LDR     s9, sp, 24
+                    LDR     s10, sp, 25
+                    LDR     s11, sp, 26
+                    LDR     t3, sp, 27
+                    LDR     t4, sp, 28
+                    LDR     t5, sp, 29
+                    LDR     t6, sp, 30
+                    LDR     sp, sp, 1
+
+                    sret
+
+                2:
+                    .short  0x2432
+                    .short  0x24d2
+                    LDR     ra, sp, 0
+                    LDR     s0, sp, 7
+                    LDR     s1, sp, 8
+                    LDR     s2, sp, 17
+                    LDR     s3, sp, 18
+                    LDR     s4, sp, 19
+                    LDR     s5, sp, 20
+                    LDR     s6, sp, 21
+                    LDR     s7, sp, 22
+                    LDR     s8, sp, 23
+                    LDR     s9, sp, 24
+                    LDR     s10, sp, 25
+                    LDR     s11, sp, 26
+                    LDR     sp, sp, 1
+
+                    ret
+                ",
+            )
+        }
+        #[cfg(not(feature = "fp_context"))]
+        {
+            core::arch::naked_asm!(
+                ".include \"macros_rv32.S\"",
+                "
+                    LDR     sp, a0, 0
+                    li      a1, 8
+                    STR     a1, a0, 0
+                ",
+                "
+                    # LOAD_CTX_AND_RETURN
+                    LDR     t0, sp, 31
+                    LDR     t1, sp, 32
+                    beqz    t0, 2f
+
+                    LDR     ra, sp, 0
+                    LDR     t0, sp, 4
+                    LDR     t1, sp, 5
+                    LDR     t2, sp, 6
+                    LDR     s0, sp, 7
+                    LDR     s1, sp, 8
+                    LDR     a0, sp, 9
+                    LDR     a1, sp, 10
+                    LDR     a2, sp, 11
+                    LDR     a3, sp, 12
+                    LDR     a4, sp, 13
+                    LDR     a5, sp, 14
+                    LDR     a6, sp, 15
+                    LDR     a7, sp, 16
+                    LDR     s2, sp, 17
+                    LDR     s3, sp, 18
+                    LDR     s4, sp, 19
+                    LDR     s5, sp, 20
+                    LDR     s6, sp, 21
+                    LDR     s7, sp, 22
+                    LDR     s8, sp, 23
+                    LDR     s9, sp, 24
+                    LDR     s10, sp, 25
+                    LDR     s11, sp, 26
+                    LDR     t3, sp, 27
+                    LDR     t4, sp, 28
+                    LDR     t5, sp, 29
+                    LDR     t6, sp, 30
+                    LDR     sp, sp, 1
+
+                    sret
+
+                2:
+                    LDR     ra, sp, 0
+                    LDR     s0, sp, 7
+                    LDR     s1, sp, 8
+                    LDR     s2, sp, 17
+                    LDR     s3, sp, 18
+                    LDR     s4, sp, 19
+                    LDR     s5, sp, 20
+                    LDR     s6, sp, 21
+                    LDR     s7, sp, 22
+                    LDR     s8, sp, 23
+                    LDR     s9, sp, 24
+                    LDR     s10, sp, 25
+                    LDR     s11, sp, 26
+                    LDR     sp, sp, 1
+
+                    ret
+                ",
+            )
+        }
+    }
+    #[cfg(target_arch = "riscv64")]
+    {
+        #[cfg(feature = "fp_context")]
+        {
+            core::arch::naked_asm!(
+                ".include \"macros_rv64.S\"",
+                "
+                    LDR     sp, a0, 0
+                    li      a1, 8
+                    STR     a1, a0, 0
+                ",
+                "
+                    # LOAD_CTX_AND_RETURN
+                    LDR     t0, sp, 31
+                    LDR     t1, sp, 32
+                    beqz    t0, 2f
+
+                    .short  0x2432
+                    .short  0x24d2
+                    LDR     ra, sp, 0
+                    LDR     t0, sp, 4
+                    LDR     t1, sp, 5
+                    LDR     t2, sp, 6
+                    LDR     s0, sp, 7
+                    LDR     s1, sp, 8
+                    LDR     a0, sp, 9
+                    LDR     a1, sp, 10
+                    LDR     a2, sp, 11
+                    LDR     a3, sp, 12
+                    LDR     a4, sp, 13
+                    LDR     a5, sp, 14
+                    LDR     a6, sp, 15
+                    LDR     a7, sp, 16
+                    LDR     s2, sp, 17
+                    LDR     s3, sp, 18
+                    LDR     s4, sp, 19
+                    LDR     s5, sp, 20
+                    LDR     s6, sp, 21
+                    LDR     s7, sp, 22
+                    LDR     s8, sp, 23
+                    LDR     s9, sp, 24
+                    LDR     s10, sp, 25
+                    LDR     s11, sp, 26
+                    LDR     t3, sp, 27
+                    LDR     t4, sp, 28
+                    LDR     t5, sp, 29
+                    LDR     t6, sp, 30
+                    LDR     sp, sp, 1
+
+                    sret
+
+                2:
+                    .short  0x2432
+                    .short  0x24d2
+                    LDR     ra, sp, 0
+                    LDR     s0, sp, 7
+                    LDR     s1, sp, 8
+                    LDR     s2, sp, 17
+                    LDR     s3, sp, 18
+                    LDR     s4, sp, 19
+                    LDR     s5, sp, 20
+                    LDR     s6, sp, 21
+                    LDR     s7, sp, 22
+                    LDR     s8, sp, 23
+                    LDR     s9, sp, 24
+                    LDR     s10, sp, 25
+                    LDR     s11, sp, 26
+                    LDR     sp, sp, 1
+
+                    ret
+                ",
+            )
+        }
+        #[cfg(not(feature = "fp_context"))]
+        {
+            core::arch::naked_asm!(
+                ".include \"macros_rv64.S\"",
+                "
+                    LDR     sp, a0, 0
+                    li      a1, 8
+                    STR     a1, a0, 0
+                ",
+                "
+                    # LOAD_CTX_AND_RETURN
+                    LDR     t0, sp, 31
+                    LDR     t1, sp, 32
+                    beqz    t0, 2f
+
+                    LDR     ra, sp, 0
+                    LDR     t0, sp, 4
+                    LDR     t1, sp, 5
+                    LDR     t2, sp, 6
+                    LDR     s0, sp, 7
+                    LDR     s1, sp, 8
+                    LDR     a0, sp, 9
+                    LDR     a1, sp, 10
+                    LDR     a2, sp, 11
+                    LDR     a3, sp, 12
+                    LDR     a4, sp, 13
+                    LDR     a5, sp, 14
+                    LDR     a6, sp, 15
+                    LDR     a7, sp, 16
+                    LDR     s2, sp, 17
+                    LDR     s3, sp, 18
+                    LDR     s4, sp, 19
+                    LDR     s5, sp, 20
+                    LDR     s6, sp, 21
+                    LDR     s7, sp, 22
+                    LDR     s8, sp, 23
+                    LDR     s9, sp, 24
+                    LDR     s10, sp, 25
+                    LDR     s11, sp, 26
+                    LDR     t3, sp, 27
+                    LDR     t4, sp, 28
+                    LDR     t5, sp, 29
+                    LDR     t6, sp, 30
+                    LDR     sp, sp, 1
+
+                    sret
+
+                2:
+                    LDR     ra, sp, 0
+                    LDR     s0, sp, 7
+                    LDR     s1, sp, 8
+                    LDR     s2, sp, 17
+                    LDR     s3, sp, 18
+                    LDR     s4, sp, 19
+                    LDR     s5, sp, 20
+                    LDR     s6, sp, 21
+                    LDR     s7, sp, 22
+                    LDR     s8, sp, 23
+                    LDR     s9, sp, 24
+                    LDR     s10, sp, 25
+                    LDR     s11, sp, 26
+                    LDR     sp, sp, 1
+
+                    ret
+                ",
+            )
+        }
+    }
 }

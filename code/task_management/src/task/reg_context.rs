@@ -209,8 +209,8 @@ global_asm!(
 .endif",
 );
 
-use core::ptr::NonNull;
 use super::switch::schedule_with_sp_change;
+use core::ptr::NonNull;
 
 const TASKCONTEXT_SIZE: usize = core::mem::size_of::<TaskContext>();
 
@@ -510,7 +510,7 @@ global_asm!(
     "
 );
 
-#[naked]
+#[unsafe(naked)]
 #[no_mangle]
 // Save the previous context to the stack, and call schedule_with_sp_change().
 pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskContext>) {
@@ -531,7 +531,7 @@ pub(crate) unsafe extern "C" fn save_prev_ctx(prev_ctx_ref: &mut NonNull<TaskCon
     )
 }
 
-#[naked]
+#[unsafe(naked)]
 /// Load the next context from the stack.
 pub(crate) unsafe extern "C" fn load_next_ctx(next_ctx_ref: &mut NonNull<TaskContext>) {
     core::arch::naked_asm!(
